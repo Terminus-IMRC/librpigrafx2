@@ -1,6 +1,10 @@
 #include <interface/mmal/mmal.h>
-#include "../include/rpigrafx.h"
-#include "../include/local.h"
+#include <interface/mmal/util/mmal_util.h>
+#include <interface/mmal/util/mmal_util_params.h>
+#include <interface/mmal/util/mmal_connection.h>
+#include <interface/mmal/util/mmal_default_components.h>
+#include "rpigrafx2.h"
+#include "local.h"
 
 #define MAX_CAMERAS MMAL_PARAMETER_CAMERA_INFO_MAX_CAMERAS
 #define NUM_SPLITTER_OUTPUTS 4
@@ -26,14 +30,23 @@ static struct isps_config {
     _Bool is_zero_copy_rendering;
 } isps_config[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
+static MMAL_POOL_T *pool_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
+
 static MMAL_CONNECTION_T *conn_camera_splitters[MAX_CAMERAS];
 static MMAL_CONNECTION_T *conn_splitters_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
-struct callback_context {
-    MMAL_STATUS_T status;
-    MMAL_BUFFER_HEADER_T *header;
-    vcos_semaphore_t sem_set_buffer, sem_rcvd_buffer;
-};
+static MMAL_STATUS_T config_port(MMAL_PORT_T *port, const MMAL_FOURCC_T encoding,
+                                 const int width, const int height)
+{
+    port->format->encoding = encoding;
+    port->format->es->video.width  = VCOS_ALIGN_UP(width,  32);
+    port->format->es->video.height = VCOS_ALIGN_UP(height, 16);
+    port->format->es->video.crop.x = 0;
+    port->format->es->video.crop.y = 0;
+    port->format->es->video.crop.width  = width;
+    port->format->es->video.crop.height = height;
+    return mmal_port_format_commit(port);
+}
 
 int priv_rpigrafx_mmal_init()
 {
@@ -53,14 +66,14 @@ int priv_rpigrafx_mmal_init()
         }
         cameras_config[i].width  = 0;
         cameras_config[i].height = 0;
-        splitters_config[i].next_idx = 0;
+        splitters_config[i].next_output_idx = 0;
     }
 
     {
         MMAL_COMPONENT_T *cp_camera_info = NULL;
         MMAL_PARAMETER_CAMERA_INFO_T camera_info = {
             .hdr = {
-                .id = MMAL_PARAMETER_CAMERA_INFO;
+                .id = MMAL_PARAMETER_CAMERA_INFO,
                 .size = sizeof(camera_info)
             }
         };
@@ -115,6 +128,7 @@ end:
 int priv_rpigrafx_mmal_finalize()
 {
     int i, j;
+    int ret = 0;
 
     if (called.mmal != 1)
         goto skip;
@@ -127,24 +141,26 @@ int priv_rpigrafx_mmal_finalize()
         cameras_config[i].height = -1;
         cameras_config[i].max_width  = -1;
         cameras_config[i].max_height = -1;
-        splitters_config[i].next_idx = 0;
+        splitters_config[i].next_output_idx = 0;
     }
 
 skip:
     called.mmal --;
+    return ret;
 }
 
 static void callback_control(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 {
     MMAL_PARAM_UNUSED(port);
-    mmal_buffer_header_release(buffer);
+    mmal_buffer_header_release(header);
 }
 
 static void callback_isp_output(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 {
-    struct callback_context *ctx = (struct callback_context*) port->user_data;
+    struct callback_context *ctx = (struct callback_context*) port->userdata;
     MMAL_STATUS_T status;
 
+    vcos_semaphore_wait(&ctx->sem_capture_next_frame);
     if (ctx->header != NULL) {
         ctx->header->length = 0;
         status = mmal_port_send_buffer(port, ctx->header);
@@ -159,13 +175,13 @@ static void callback_isp_output(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 
 end:
     ctx->header = header;
-    vcos_semaphore_post(&ctx->sem);
+    vcos_semaphore_post(&ctx->sem_header_set);
 }
 
 int rpigrafx_config_camera_frame(const int32_t camera_number,
                                  const int32_t width, const int32_t height,
                                  const MMAL_FOURCC_T encoding,
-                                 const _Bool is_zero_copy_rendering
+                                 const _Bool is_zero_copy_rendering,
                                  rpigrafx_frame_config_t *fcp)
 {
     int32_t max_width, max_height;
@@ -230,6 +246,7 @@ end:
 int rpigrafx_finish_config()
 {
     int i, j;
+    MMAL_STATUS_T status;
     int ret = 0;
 
     for (i = 0; i < num_cameras; i ++) {
@@ -237,7 +254,7 @@ int rpigrafx_finish_config()
         /* Maximum width/height of the requested frames. */
         int32_t max_width, max_height;
 
-        if (!cp_cameras[i].is_used)
+        if (!cameras_config[i].is_used)
             continue;
 
         len = splitters_config[i].next_output_idx;
@@ -297,7 +314,7 @@ int rpigrafx_finish_config()
                 goto end;
             }
 
-            status = mmal_parameter_set_boolean(output,
+            status = mmal_port_parameter_set_boolean(output,
                                                 MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
             if (status != MMAL_SUCCESS) {
                 print_error("Setting zero-copy on camera %d failed: 0x%08x", i, status);
@@ -305,7 +322,7 @@ int rpigrafx_finish_config()
                 goto end;
             }
         }
-        status = mmal_component_enable(cp_camera[i]);
+        status = mmal_component_enable(cp_cameras[i]);
         if (status != MMAL_SUCCESS) {
             print_error("Enabling camera component of camera %d failed: 0x%08x",
                         i, status);
@@ -313,7 +330,7 @@ int rpigrafx_finish_config()
             goto end;
         }
 
-        status = mmal_component_create(MMAL_COMPONENT_VIDEO_SPLITTER, &cp_splitters[i]);
+        status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_SPLITTER, &cp_splitters[i]);
         if (status != MMAL_SUCCESS) {
             print_error("Creating splitter component of camera %d failed: 0x%08x",
                         i, status);
@@ -356,7 +373,7 @@ int rpigrafx_finish_config()
                 goto end;
             }
 
-            status = mmal_parameter_set_boolean(input,
+            status = mmal_port_parameter_set_boolean(input,
                                                 MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
             if (status != MMAL_SUCCESS) {
                 print_error("Setting zero-copy on " \
@@ -383,7 +400,7 @@ int rpigrafx_finish_config()
                 goto end;
             }
 
-            status = mmal_parameter_set_boolean(output,
+            status = mmal_port_parameter_set_boolean(output,
                                                 MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
             if (status != MMAL_SUCCESS) {
                 print_error("Setting zero-copy on " \
@@ -392,7 +409,7 @@ int rpigrafx_finish_config()
                 goto end;
             }
         }
-        status = mmal_component_enable(cp_splitter[i]);
+        status = mmal_component_enable(cp_splitters[i]);
         if (status != MMAL_SUCCESS) {
             print_error("Enabling splitter component of " \
                         "camera %d failed: 0x%08x", i, status);
@@ -443,7 +460,7 @@ int rpigrafx_finish_config()
                     goto end;
                 }
 
-                status = mmal_parameter_set_boolean(input,
+                status = mmal_port_parameter_set_boolean(input,
                                                     MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
                 if (status != MMAL_SUCCESS) {
                     print_error("Setting zero-copy on " \
@@ -473,7 +490,7 @@ int rpigrafx_finish_config()
                     goto end;
                 }
 
-                status = mmal_parameter_set_boolean(output,
+                status = mmal_port_parameter_set_boolean(output,
                                                     MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
                 if (status != MMAL_SUCCESS) {
                     print_error("Setting zero-copy on " \
@@ -482,16 +499,16 @@ int rpigrafx_finish_config()
                     goto end;
                 }
 
-                pool_isp[i][j] = mmal_port_pool_create(output,
-                                                       output->buffer_num,
-                                                       output->buffer_size);
-                if (pool_isp[i][j] == NULL) {
+                pool_isps[i][j] = mmal_port_pool_create(output,
+                                                        output->buffer_num,
+                                                        output->buffer_size);
+                if (pool_isps[i][j] == NULL) {
                     print_error("Creating pool of isp component %d,%d failed", i, j);
                     ret = 1;
                     goto end;
                 }
             }
-            status = mmal_component_enable(cp_isp[i][j]);
+            status = mmal_component_enable(cp_isps[i][j]);
             if (status != MMAL_SUCCESS) {
                 print_error("Enabling isp component %d,%d failed: 0x%08x", i, j, status);
                 ret = 1;
@@ -553,11 +570,21 @@ end:
     return ret;
 }
 
-void* rpigrafx_get_frame(rpigrafx_frame_config_t fc)
+int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
 {
-    const int i = fc.camera_number;
-    const int j = fc.splitter_output_port_index;
-    MMAL_COMPONENT_T *output = NULL;
+    struct callback_context *ctx = &fcp->ctx;
+    int ret = 0;
+
+    vcos_semaphore_post(&ctx->sem_capture_next_frame);
+
+    return ret;
+}
+
+void* rpigrafx_get_frame(rpigrafx_frame_config_t *fcp)
+{
+    const int i = fcp->camera_number;
+    const int j = fcp->splitter_output_port_index;
+    MMAL_PORT_T *output = NULL;
     struct callback_context *ctx = NULL;
     void *ret = NULL;
 
@@ -568,31 +595,31 @@ void* rpigrafx_get_frame(rpigrafx_frame_config_t fc)
         goto end;
     }
 
-    ctx = &isps_ctx[i][j];
-    vcos_semaphore_wait(ctx->sem_sent_header);
+    ctx = &fcp->ctx;
+    /*
+     * Ignore the status here because trywait() returns VCOS_EAGAIN even when
+     * the call failed to take semaphore.
+     */
+    vcos_semaphore_trywait(&ctx->sem_header_set);
     if (ctx->status != MMAL_SUCCESS) {
         print_error("Getting output buffer of isp %d,%d failed: 0x%08x", i, j, ctx->status);
         ret = NULL;
         goto end;
     }
-    ret = ctx->header->buffer;
-    vcos_semaphore_post(ctx->sem_rcvd_header);
+    ret = ctx->header->data;
 
 end:
     return ret;
 }
 
-int rpigrafx_register_frame_pool_to_qmkl(rpigrafx_frame_config_t fc);
-
-int rpigrafx_config_render(const _Bool is_fullscreen,
+int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
                            const int32_t x, const int32_t y,
                            const int32_t width, const int32_t height,
                            const int32_t layer,
-                           rpigrafx_frame_config_t fc,
-                           rpigrafx_render_config_t *rcp)
+                           rpigrafx_frame_config_t *fcp)
 {
     struct isps_config *isp_config =
-        &isps_config[fc.camera_number][fc.splitter_output_port_index];
+        &isps_config[fcp->camera_number][fcp->splitter_output_port_index];
     MMAL_DISPLAYREGION_T region = {
         .fullscreen = is_fullscreen,
         .dest_rect = {
@@ -616,12 +643,12 @@ int rpigrafx_config_render(const _Bool is_fullscreen,
         goto end;
     }
 
-    status = config_port(render, isp_config->encoding,
+    status = config_port(render->input[0], isp_config->encoding,
                          isp_config->width, isp_config->height);
     if (status != MMAL_SUCCESS) {
     }
 
-    status = mmal_util_set_display_region(render, &region);
+    status = mmal_util_set_display_region(render->input[0], &region);
     if (status != MMAL_SUCCESS) {
         print_error("Setting display region of "
                     "render component failed: 0x%08x", status);
@@ -630,30 +657,20 @@ int rpigrafx_config_render(const _Bool is_fullscreen,
     }
 
 end:
-    rcp->render = render;
+    fcp->render = render;
     return ret;
 }
 
-int rpigrafx_render_frame(void *frame,
-                          rpigrafx_frame_config_t fc, rpigrafx_render_config_t rc)
+int rpigrafx_render_frame(rpigrafx_frame_config_t *fcp)
 {
-    MMAL_BUFFER_HEADER_T *header = fc.header;
+    MMAL_BUFFER_HEADER_T *header = fcp->ctx.header;
     uint32_t flags_orig;
+    MMAL_STATUS_T status;
     int ret = 0;
-
-    if (frame == NULL) {
-        print_error("frame is NULL");
-        ret = 1;
-        goto end;
-    } else if (frame != header->data) {
-        print_error("frame(%p) is differenet from header->data(%p)", frame, header->data);
-        ret = 1;
-        goto end;
-    }
 
     flags_orig = header->flags;
     header->flags |= MMAL_BUFFER_HEADER_FLAG_EOS;
-    status = mmal_port_send_buffer(rc.render, header);
+    status = mmal_port_send_buffer(fcp->render->input[0], header);
     if (status != MMAL_SUCCESS) {
         print_error("Sending header to render failed: 0x%08x", status);
         header->flags = flags_orig;
