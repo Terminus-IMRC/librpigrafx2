@@ -1,5 +1,6 @@
 #include <interface/mmal/mmal.h>
 #include "../include/rpigrafx.h"
+#include "../include/local.h"
 
 #define MAX_CAMERAS MMAL_PARAMETER_CAMERA_INFO_MAX_CAMERAS
 #define NUM_SPLITTER_OUTPUTS 4
@@ -7,20 +8,21 @@
 static int32_t num_cameras = 0;
 
 static MMAL_COMPONENT_T *cp_cameras[MAX_CAMERAS];
-static struct {
+static struct cameras_config {
     _Bool is_used;
     int32_t width, height;
     int32_t max_width, max_height;
 } cameras_config[MAX_CAMERAS];
 
 static MMAL_COMPONENT_T *cp_splitters[MAX_CAMERAS];
-static struct {
+static struct splitters_config {
     int next_output_idx;
 } splitters_config[MAX_CAMERAS];
 
 static MMAL_COMPONENT_T *cp_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
-static struct {
+static struct isps_config {
     int32_t width, height;
+    MMAL_FOURCC_T encoding;
     _Bool is_zero_copy_rendering;
 } isps_config[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
@@ -141,7 +143,21 @@ static void callback_control(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 static void callback_isp_output(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 {
     struct callback_context *ctx = (struct callback_context*) port->user_data;
+    MMAL_STATUS_T status;
 
+    if (ctx->header != NULL) {
+        ctx->header->length = 0;
+        status = mmal_port_send_buffer(port, ctx->header);
+        if (status != MMAL_SUCCESS) {
+            print_error("Sending header %p %p %d 0x%08x failed: 0x%08x",
+                        ctx->header, ctx->header->data,
+                        ctx->header->length, ctx->header->flags, status);
+            ctx->status = status;
+            goto end;
+        }
+    }
+
+end:
     ctx->header = header;
     vcos_semaphore_post(&ctx->sem);
 }
@@ -157,7 +173,8 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
     int ret = 0;
 
     if (camera_number >= num_cameras) {
-        print_error("camera_number(%d) exceeds num_cameras(%d)", camera_number, num_cameras);
+        print_error("camera_number(%d) exceeds num_cameras(%d)",
+                    camera_number, num_cameras);
         ret = 1;
         goto end;
     }
@@ -171,6 +188,12 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
     } else if (height > max_height) {
         print_error("height(%d) exceeds max_height(%d) of camera %d",
                     width, max_width, camera_number);
+        ret = 1;
+        goto end;
+    }
+
+    if (encoding != MMAL_ENCODING_RGBA) {
+        print_error("Only RGBA is supported for now");
         ret = 1;
         goto end;
     }
@@ -193,6 +216,7 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
 
     isps_config[camera_number][idx].width  = width;
     isps_config[camera_number][idx].height = height;
+    isps_config[camera_number][idx].encoding = encoding;
     isps_config[camera_number][idx].is_zero_copy_rendering = is_zero_copy_rendering;
 
     fcp->camera_number = camera_number;
@@ -226,7 +250,8 @@ int rpigrafx_finish_config()
 
         status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA, &cp_cameras[i]);
         if (status != MMAL_SUCCESS) {
-            print_error("Creating camera component of camera %d failed: 0x%08x", i, status);
+            print_error("Creating camera component of camera %d failed: 0x%08x",
+                        i, status);
             ret = 1;
             goto end;
         }
@@ -249,7 +274,8 @@ int rpigrafx_finish_config()
 
             status = mmal_port_enable(control, callback_control);
             if (status != MMAL_SUCCESS) {
-                print_error("Enabling control port of camera %d failed: 0x%08x", i, status);
+                print_error("Enabling control port of camera %d failed: 0x%08x",
+                            i, status);
                 ret = 1;
                 goto end;
             }
@@ -281,14 +307,16 @@ int rpigrafx_finish_config()
         }
         status = mmal_component_enable(cp_camera[i]);
         if (status != MMAL_SUCCESS) {
-            print_error("Enabling camera component of camera %d failed: 0x%08x", i, status);
+            print_error("Enabling camera component of camera %d failed: 0x%08x",
+                        i, status);
             ret = 1;
             goto end;
         }
 
         status = mmal_component_create(MMAL_COMPONENT_VIDEO_SPLITTER, &cp_splitters[i]);
         if (status != MMAL_SUCCESS) {
-            print_error("Creating splitter component of camera %d failed: 0x%08x", i, status);
+            print_error("Creating splitter component of camera %d failed: 0x%08x",
+                        i, status);
             ret = 1;
             goto end;
         }
@@ -304,7 +332,8 @@ int rpigrafx_finish_config()
 
             status = mmal_port_enable(control, callback_control);
             if (status != MMAL_SUCCESS) {
-                print_error("Enabling control port of splitter %d failed: 0x%08x", i, status);
+                print_error("Enabling control port of splitter %d failed: 0x%08x",
+                            i, status);
                 ret = 1;
                 goto end;
             }
@@ -365,7 +394,8 @@ int rpigrafx_finish_config()
         }
         status = mmal_component_enable(cp_splitter[i]);
         if (status != MMAL_SUCCESS) {
-            print_error("Enabling splitter component of camera %d failed: 0x%08x", i, status);
+            print_error("Enabling splitter component of " \
+                        "camera %d failed: 0x%08x", i, status);
             ret = 1;
             goto end;
         }
@@ -558,7 +588,79 @@ int rpigrafx_config_render(const _Bool is_fullscreen,
                            const int32_t x, const int32_t y,
                            const int32_t width, const int32_t height,
                            const int32_t layer,
-                           rpigrafx_render_config_t *rcp);
+                           rpigrafx_frame_config_t fc,
+                           rpigrafx_render_config_t *rcp)
+{
+    struct isps_config *isp_config =
+        &isps_config[fc.camera_number][fc.splitter_output_port_index];
+    MMAL_DISPLAYREGION_T region = {
+        .fullscreen = is_fullscreen,
+        .dest_rect = {
+            .x = x, .y = y,
+            .width = width, .height = height
+        },
+        .layer = layer,
+        .set =   MMAL_DISPLAY_SET_FULLSCREEN
+               | MMAL_DISPLAY_SET_DEST_RECT
+               | MMAL_DISPLAY_SET_LAYER
+    };
+    MMAL_COMPONENT_T *render = NULL;
+    MMAL_STATUS_T status;
+    int ret = 0;
 
-int rpigrafx_render_frane(rpigrafx_frame_cofig_t fc,
-                          rpigrafx_render_config_t rc);
+    status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &render);
+    if (status != MMAL_SUCCESS) {
+        print_error("Creating video_render component failed: 0x%08x\n", status);
+        render = NULL;
+        ret = 1;
+        goto end;
+    }
+
+    status = config_port(render, isp_config->encoding,
+                         isp_config->width, isp_config->height);
+    if (status != MMAL_SUCCESS) {
+    }
+
+    status = mmal_util_set_display_region(render, &region);
+    if (status != MMAL_SUCCESS) {
+        print_error("Setting display region of "
+                    "render component failed: 0x%08x", status);
+        ret = 1;
+        goto end;
+    }
+
+end:
+    rcp->render = render;
+    return ret;
+}
+
+int rpigrafx_render_frame(void *frame,
+                          rpigrafx_frame_config_t fc, rpigrafx_render_config_t rc)
+{
+    MMAL_BUFFER_HEADER_T *header = fc.header;
+    uint32_t flags_orig;
+    int ret = 0;
+
+    if (frame == NULL) {
+        print_error("frame is NULL");
+        ret = 1;
+        goto end;
+    } else if (frame != header->data) {
+        print_error("frame(%p) is differenet from header->data(%p)", frame, header->data);
+        ret = 1;
+        goto end;
+    }
+
+    flags_orig = header->flags;
+    header->flags |= MMAL_BUFFER_HEADER_FLAG_EOS;
+    status = mmal_port_send_buffer(rc.render, header);
+    if (status != MMAL_SUCCESS) {
+        print_error("Sending header to render failed: 0x%08x", status);
+        header->flags = flags_orig;
+        goto end;
+    }
+    header->flags = flags_orig;
+
+end:
+    return ret;
+}
