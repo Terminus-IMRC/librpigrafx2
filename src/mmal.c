@@ -35,6 +35,8 @@ static MMAL_POOL_T *pool_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 static MMAL_CONNECTION_T *conn_camera_splitters[MAX_CAMERAS];
 static MMAL_CONNECTION_T *conn_splitters_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
+static struct callback_context *ctxs[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
+
 static MMAL_STATUS_T config_port(MMAL_PORT_T *port, const MMAL_FOURCC_T encoding,
                                  const int width, const int height)
 {
@@ -162,8 +164,14 @@ static void callback_isp_output(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 {
     struct callback_context *ctx = (struct callback_context*) port->userdata;
     MMAL_STATUS_T status;
+    VCOS_STATUS_T status_vcos;
 
-    vcos_semaphore_wait(&ctx->sem_capture_next_frame);
+    status_vcos = vcos_semaphore_wait(&ctx->sem_capture_next_frame);
+    if (status_vcos != VCOS_SUCCESS) {
+        print_error("Waiting for semaphore failed: 0x%08x", status_vcos);
+        goto end;
+    }
+
     if (ctx->header != NULL) {
         ctx->header->length = 0;
         status = mmal_port_send_buffer(port, ctx->header);
@@ -249,18 +257,19 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
     ctx->status = MMAL_SUCCESS;
     ctx->header = NULL;
     /* Note: It seems that the name can be duplicated. It can even be NULL. */
-    status_vcos = vcos_semaphore_create(&ctx->sem_capture_next_frame, "capture_next_frame", 1);
+    status_vcos = vcos_semaphore_create(&ctx->sem_capture_next_frame, "capture_next_frame", 0);
     if (status_vcos != VCOS_SUCCESS) {
         print_error("Failed to create semaphore: 0x%08x", status_vcos);
         ret = 1;
         goto end;
     }
-    status_vcos = vcos_semaphore_create(&ctx->sem_header_set, "header_set", 1);
+    status_vcos = vcos_semaphore_create(&ctx->sem_header_set, "header_set", 0);
     if (status_vcos != VCOS_SUCCESS) {
         print_error("Failed to create semaphore: 0x%08x", status_vcos);
         ret = 1;
         goto end;
     }
+    ctxs[camera_number][idx] = ctx;
 
     fcp->camera_number = camera_number;
     fcp->splitter_output_port_index = idx;
@@ -385,7 +394,7 @@ int rpigrafx_finish_config()
                 goto end;
             }
 
-            status = config_port(output, MMAL_ENCODING_OPAQUE, max_width, max_height);
+            status = config_port(output, MMAL_ENCODING_RGBA, max_width, max_height);
             if (status != MMAL_SUCCESS) {
                 print_error("Setting format of camera %d failed: 0x%08x", i, status);
                 ret = 1;
@@ -433,12 +442,12 @@ int rpigrafx_finish_config()
                 goto end;
             }
         }
-        for (j = 0; j < len; j ++) {
+        {
             MMAL_PORT_T *input = mmal_util_get_port(cp_splitters[i],
-                                                    MMAL_PORT_TYPE_INPUT, j);
+                                                    MMAL_PORT_TYPE_INPUT, 0);
 
             if (input == NULL) {
-                print_error("Getting input port of splitter %d,%d failed", i, j);
+                print_error("Getting input port of splitter %d failed", i);
                 ret = 1;
                 goto end;
             }
@@ -446,7 +455,7 @@ int rpigrafx_finish_config()
             status = config_port(input, MMAL_ENCODING_OPAQUE, max_width, max_height);
             if (status != MMAL_SUCCESS) {
                 print_error("Setting format of " \
-                            "splitter %d input %d failed: 0x%08x", i, j, status);
+                            "splitter %d input failed: 0x%08x", i, status);
                 ret = 1;
                 goto end;
             }
@@ -455,7 +464,7 @@ int rpigrafx_finish_config()
                                                 MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
             if (status != MMAL_SUCCESS) {
                 print_error("Setting zero-copy on " \
-                            "splitter %d input %d failed: 0x%08x", i, j, status);
+                            "splitter %d input failed: 0x%08x", i, status);
                 ret = 1;
                 goto end;
             }
@@ -470,7 +479,7 @@ int rpigrafx_finish_config()
                 goto end;
             }
 
-            status = config_port(output, MMAL_ENCODING_OPAQUE, max_width, max_height);
+            status = config_port(output, MMAL_ENCODING_RGBA, max_width, max_height);
             if (status != MMAL_SUCCESS) {
                 print_error("Setting format of " \
                             "splitter %d output %d failed: 0x%08x", i, j, status);
@@ -522,7 +531,7 @@ int rpigrafx_finish_config()
             }
             {
                 MMAL_PORT_T *input = mmal_util_get_port(cp_isps[i][j],
-                                                        MMAL_PORT_TYPE_INPUT, j);
+                                                        MMAL_PORT_TYPE_INPUT, 0);
 
                 if (input == NULL) {
                     print_error("Getting input port of isp %d,%d failed", i, j);
@@ -530,7 +539,7 @@ int rpigrafx_finish_config()
                     goto end;
                 }
 
-                status = config_port(input, MMAL_ENCODING_OPAQUE, max_width, max_height);
+                status = config_port(input, MMAL_ENCODING_RGBA, max_width, max_height);
                 if (status != MMAL_SUCCESS) {
                     print_error("Setting format of " \
                                 "isp %d input %d failed: 0x%08x", i, j, status);
@@ -549,7 +558,7 @@ int rpigrafx_finish_config()
             }
             {
                 MMAL_PORT_T *output = mmal_util_get_port(cp_isps[i][j],
-                                                         MMAL_PORT_TYPE_OUTPUT, j);
+                                                         MMAL_PORT_TYPE_OUTPUT, 0);
 
                 if (output == NULL) {
                     print_error("Getting output port of isp %d,%d failed", i, j);
@@ -585,6 +594,8 @@ int rpigrafx_finish_config()
                     ret = 1;
                     goto end;
                 }
+
+                output->userdata = (void*) ctxs[i][j];
             }
             status = mmal_component_enable(cp_isps[i][j]);
             if (status != MMAL_SUCCESS) {
@@ -642,6 +653,19 @@ int rpigrafx_finish_config()
             ret = 1;
             goto end;
         }
+
+        for (j = 0; j < len; j ++) {
+            MMAL_BUFFER_HEADER_T *header = NULL;
+            while ((header = mmal_queue_get(pool_isps[i][j]->queue)) != NULL) {
+                status = mmal_port_send_buffer(cp_isps[i][j]->output[0], header);
+                if (status != MMAL_SUCCESS) {
+                    print_error("Sending pool buffer to "
+                                "isp %d,%d failed: 0x%08x", status);
+                    ret = 1;
+                    goto end;
+                }
+            }
+        }
     }
 
 end:
@@ -662,17 +686,25 @@ void* rpigrafx_get_frame(rpigrafx_frame_config_t *fcp)
 {
     struct callback_context *ctx = fcp->ctx;
     void *ret = NULL;
+    VCOS_STATUS_T status_vcos;
 
-    /*
-     * Ignore the status here because trywait() returns VCOS_EAGAIN even when
-     * the call failed to take semaphore.
-     */
-    vcos_semaphore_trywait(&ctx->sem_header_set);
+    status_vcos = vcos_semaphore_trywait(&ctx->sem_header_set);
+    if (status_vcos != VCOS_SUCCESS && status_vcos != VCOS_EAGAIN) {
+        print_error("Try-waiting for semaphore failed: 0x%08x", status_vcos);
+        ret = NULL;
+        goto end;
+    }
 
     if (ctx->status != MMAL_SUCCESS) {
         print_error("Getting output buffer of isp %d,%d failed: 0x%08x",
                     fcp->camera_number, fcp->splitter_output_port_index,
                     ctx->status);
+        ret = NULL;
+        goto end;
+    }
+    if (ctx->header == NULL) {
+        print_error("Output buffer of isp %d,%d is NULL",
+                    fcp->camera_number, fcp->splitter_output_port_index);
         ret = NULL;
         goto end;
     }
@@ -688,13 +720,15 @@ int rpigrafx_render_frame(rpigrafx_frame_config_t *fcp)
     struct callback_context *ctx = fcp->ctx;
     uint32_t flags_orig;
     MMAL_STATUS_T status;
+    VCOS_STATUS_T status_vcos;
     int ret = 0;
 
-    /*
-     * Ignore the status here because trywait() returns VCOS_EAGAIN even when
-     * the call failed to take semaphore.
-     */
-    vcos_semaphore_trywait(&ctx->sem_header_set);
+    status_vcos = vcos_semaphore_trywait(&ctx->sem_header_set);
+    if (status_vcos != VCOS_SUCCESS && status_vcos != VCOS_EAGAIN) {
+        print_error("Try-waiting for semaphore failed: 0x%08x", status_vcos);
+        ret = 0;
+        goto end;
+    }
 
     if (ctx->status != MMAL_SUCCESS) {
         print_error("Getting output buffer of isp %d,%d failed: 0x%08x",

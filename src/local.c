@@ -13,4 +13,6 @@ void print_error_core(const char *file, const int line, const char *func,
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
+
+    putc('\n', stderr);
 }

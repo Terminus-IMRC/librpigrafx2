@@ -23,7 +23,11 @@ AM_PROG_AR
 
 # Checks for libraries.
 PKG_CHECK_MODULES([BCM_HOST], [bcm_host])
+AC_SUBST([BCM_HOST_CFLAGS])
+AC_SUBST([BCM_HOST_LIBS])
 PKG_CHECK_MODULES([MMAL], [mmal])
+AC_SUBST([MMAL_CFLAGS])
+AC_SUBST([MMAL_LIBS])
 
 # Checks for header files.
 AC_CHECK_HEADERS([stdio.h stdint.h stdlib.h])

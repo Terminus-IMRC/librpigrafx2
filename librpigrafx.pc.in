@@ -6,5 +6,6 @@ includedir=@includedir@
 Name: @PACKAGE@
 Description: Graphic library for Raspberry Pi
 Version: @VERSION@
-Cflags: -I${includedir} -I/opt/vc/include
-Libs: -L${libdir} -L/opt/vc/lib -lrpigrafx2 -lbcm_host
+Requires: bcm_host mmal
+Cflags: -I${includedir}
+Libs: -L${libdir} -lrpigrafx
