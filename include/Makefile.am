@@ -1,1 +1,1 @@
-include_HEADERS = rpigrafx2.h
+include_HEADERS = rpigrafx.h

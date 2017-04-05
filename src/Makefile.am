@@ -1,5 +1,5 @@
 AM_CFLAGS = -pipe -O2 -g -W -Wall -Wextra -I$(top_srcdir)/include
 
-lib_LTLIBRARIES = librpigrafx2.la
+lib_LTLIBRARIES = librpigrafx.la
 
-librpigrafx2_la_SOURCES = main.c mmal.c local.c
+librpigrafx_la_SOURCES = main.c mmal.c local.c

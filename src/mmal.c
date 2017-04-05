@@ -3,10 +3,10 @@
 #include <interface/mmal/util/mmal_util_params.h>
 #include <interface/mmal/util/mmal_connection.h>
 #include <interface/mmal/util/mmal_default_components.h>
-#include "rpigrafx2.h"
+#include "rpigrafx.h"
 #include "local.h"
 
-#define MAX_CAMERAS MMAL_PARAMETER_CAMERA_INFO_MAX_CAMERAS
+#define MAX_CAMERAS          MMAL_PARAMETER_CAMERA_INFO_MAX_CAMERAS
 #define NUM_SPLITTER_OUTPUTS 4
 
 static int32_t num_cameras = 0;
@@ -58,15 +58,18 @@ int priv_rpigrafx_mmal_init()
         goto end;
 
     for (i = 0; i < MAX_CAMERAS; i ++) {
-        cp_cameras[i] = cp_splitters[i] = NULL;
+        cp_cameras[i] = NULL;
+        cameras_config[i].is_used = 0;
+
+        cp_splitters[i] = NULL;
+        splitters_config[i].next_output_idx = 0;
         conn_camera_splitters[i] = NULL;
+
         for (j = 0; j < NUM_SPLITTER_OUTPUTS; j ++) {
             cp_isps[i][j] = NULL;
             conn_splitters_isps[i][j] = NULL;
+            pool_isps[i][j] = NULL;
         }
-        cameras_config[i].width  = 0;
-        cameras_config[i].height = 0;
-        splitters_config[i].next_output_idx = 0;
     }
 
     {
@@ -186,6 +189,8 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
 {
     int32_t max_width, max_height;
     int idx;
+    struct callback_context *ctx = NULL;
+    VCOS_STATUS_T status_vcos;
     int ret = 0;
 
     if (camera_number >= num_cameras) {
@@ -235,11 +240,84 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
     isps_config[camera_number][idx].encoding = encoding;
     isps_config[camera_number][idx].is_zero_copy_rendering = is_zero_copy_rendering;
 
+    ctx = malloc(sizeof(*ctx));
+    if (ctx == NULL) {
+        print_error("Failed to allocate context");
+        ret = 1;
+        goto end;
+    }
+    ctx->status = MMAL_SUCCESS;
+    ctx->header = NULL;
+    /* Note: It seems that the name can be duplicated. It can even be NULL. */
+    status_vcos = vcos_semaphore_create(&ctx->sem_capture_next_frame, "capture_next_frame", 1);
+    if (status_vcos != VCOS_SUCCESS) {
+        print_error("Failed to create semaphore: 0x%08x", status_vcos);
+        ret = 1;
+        goto end;
+    }
+    status_vcos = vcos_semaphore_create(&ctx->sem_header_set, "header_set", 1);
+    if (status_vcos != VCOS_SUCCESS) {
+        print_error("Failed to create semaphore: 0x%08x", status_vcos);
+        ret = 1;
+        goto end;
+    }
+
     fcp->camera_number = camera_number;
     fcp->splitter_output_port_index = idx;
     fcp->is_zero_copy_rendering = is_zero_copy_rendering;
+    fcp->ctx = ctx;
+    fcp->render = NULL;
 
 end:
+    return ret;
+}
+
+int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
+                           const int32_t x, const int32_t y,
+                           const int32_t width, const int32_t height,
+                           const int32_t layer,
+                           rpigrafx_frame_config_t *fcp)
+{
+    struct isps_config *isp_config =
+        &isps_config[fcp->camera_number][fcp->splitter_output_port_index];
+    MMAL_DISPLAYREGION_T region = {
+        .fullscreen = is_fullscreen,
+        .dest_rect = {
+            .x = x, .y = y,
+            .width = width, .height = height
+        },
+        .layer = layer,
+        .set =   MMAL_DISPLAY_SET_FULLSCREEN
+               | MMAL_DISPLAY_SET_DEST_RECT
+               | MMAL_DISPLAY_SET_LAYER
+    };
+    MMAL_COMPONENT_T *render = NULL;
+    MMAL_STATUS_T status;
+    int ret = 0;
+
+    status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &render);
+    if (status != MMAL_SUCCESS) {
+        print_error("Creating video_render component failed: 0x%08x\n", status);
+        render = NULL;
+        ret = 1;
+        goto end;
+    }
+
+    status = config_port(render->input[0], isp_config->encoding,
+                         isp_config->width, isp_config->height);
+    if (status != MMAL_SUCCESS) {
+    }
+
+    status = mmal_util_set_display_region(render->input[0], &region);
+    if (status != MMAL_SUCCESS) {
+        print_error("Setting display region of "
+                    "render component failed: 0x%08x", status);
+        ret = 1;
+        goto end;
+    }
+
+end:
+    fcp->render = render;
     return ret;
 }
 
@@ -572,7 +650,7 @@ end:
 
 int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
 {
-    struct callback_context *ctx = &fcp->ctx;
+    struct callback_context *ctx = fcp->ctx;
     int ret = 0;
 
     vcos_semaphore_post(&ctx->sem_capture_next_frame);
@@ -582,27 +660,19 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
 
 void* rpigrafx_get_frame(rpigrafx_frame_config_t *fcp)
 {
-    const int i = fcp->camera_number;
-    const int j = fcp->splitter_output_port_index;
-    MMAL_PORT_T *output = NULL;
-    struct callback_context *ctx = NULL;
+    struct callback_context *ctx = fcp->ctx;
     void *ret = NULL;
 
-    output = mmal_util_get_port(cp_isps[i][j], MMAL_PORT_TYPE_OUTPUT, 0);
-    if (output == NULL) {
-        print_error("Getting output port of isp %d,%d failed", i, j);
-        ret = NULL;
-        goto end;
-    }
-
-    ctx = &fcp->ctx;
     /*
      * Ignore the status here because trywait() returns VCOS_EAGAIN even when
      * the call failed to take semaphore.
      */
     vcos_semaphore_trywait(&ctx->sem_header_set);
+
     if (ctx->status != MMAL_SUCCESS) {
-        print_error("Getting output buffer of isp %d,%d failed: 0x%08x", i, j, ctx->status);
+        print_error("Getting output buffer of isp %d,%d failed: 0x%08x",
+                    fcp->camera_number, fcp->splitter_output_port_index,
+                    ctx->status);
         ret = NULL;
         goto end;
     }
@@ -612,61 +682,28 @@ end:
     return ret;
 }
 
-int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
-                           const int32_t x, const int32_t y,
-                           const int32_t width, const int32_t height,
-                           const int32_t layer,
-                           rpigrafx_frame_config_t *fcp)
-{
-    struct isps_config *isp_config =
-        &isps_config[fcp->camera_number][fcp->splitter_output_port_index];
-    MMAL_DISPLAYREGION_T region = {
-        .fullscreen = is_fullscreen,
-        .dest_rect = {
-            .x = x, .y = y,
-            .width = width, .height = height
-        },
-        .layer = layer,
-        .set =   MMAL_DISPLAY_SET_FULLSCREEN
-               | MMAL_DISPLAY_SET_DEST_RECT
-               | MMAL_DISPLAY_SET_LAYER
-    };
-    MMAL_COMPONENT_T *render = NULL;
-    MMAL_STATUS_T status;
-    int ret = 0;
-
-    status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &render);
-    if (status != MMAL_SUCCESS) {
-        print_error("Creating video_render component failed: 0x%08x\n", status);
-        render = NULL;
-        ret = 1;
-        goto end;
-    }
-
-    status = config_port(render->input[0], isp_config->encoding,
-                         isp_config->width, isp_config->height);
-    if (status != MMAL_SUCCESS) {
-    }
-
-    status = mmal_util_set_display_region(render->input[0], &region);
-    if (status != MMAL_SUCCESS) {
-        print_error("Setting display region of "
-                    "render component failed: 0x%08x", status);
-        ret = 1;
-        goto end;
-    }
-
-end:
-    fcp->render = render;
-    return ret;
-}
-
 int rpigrafx_render_frame(rpigrafx_frame_config_t *fcp)
 {
-    MMAL_BUFFER_HEADER_T *header = fcp->ctx.header;
+    MMAL_BUFFER_HEADER_T *header = NULL;
+    struct callback_context *ctx = fcp->ctx;
     uint32_t flags_orig;
     MMAL_STATUS_T status;
     int ret = 0;
+
+    /*
+     * Ignore the status here because trywait() returns VCOS_EAGAIN even when
+     * the call failed to take semaphore.
+     */
+    vcos_semaphore_trywait(&ctx->sem_header_set);
+
+    if (ctx->status != MMAL_SUCCESS) {
+        print_error("Getting output buffer of isp %d,%d failed: 0x%08x",
+                    fcp->camera_number, fcp->splitter_output_port_index,
+                    ctx->status);
+        ret = 1;
+        goto end;
+    }
+    header = fcp->ctx->header;
 
     flags_orig = header->flags;
     header->flags |= MMAL_BUFFER_HEADER_FLAG_EOS;

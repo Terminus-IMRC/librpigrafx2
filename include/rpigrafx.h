@@ -15,7 +15,7 @@
         int32_t camera_number;
         unsigned splitter_output_port_index;
         _Bool is_zero_copy_rendering;
-        struct callback_context ctx;
+        struct callback_context *ctx;
         MMAL_COMPONENT_T *render;
     } rpigrafx_frame_config_t;
 
