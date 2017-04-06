@@ -163,6 +163,7 @@ static void callback_control(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 static void callback_isp_output(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 {
     struct callback_context *ctx = (struct callback_context*) port->userdata;
+    uint32_t length;
     MMAL_STATUS_T status;
     VCOS_STATUS_T status_vcos;
 
@@ -172,21 +173,40 @@ static void callback_isp_output(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
         goto end;
     }
 
-    if (ctx->header != NULL) {
-        ctx->header->length = 0;
-        status = mmal_port_send_buffer(port, ctx->header);
-        if (status != MMAL_SUCCESS) {
-            print_error("Sending header %p %p %d 0x%08x failed: 0x%08x",
-                        ctx->header, ctx->header->data,
-                        ctx->header->length, ctx->header->flags, status);
-            ctx->status = status;
+    length = header->length;
+    header->length = 0;
+    status = mmal_port_send_buffer(port, header);
+    if (status != MMAL_SUCCESS) {
+        print_error("Sending header %p %p %d 0x%08x failed: 0x%08x",
+                    header, header->data,
+                    header->length, header->flags, status);
+        ctx->status = status;
+        goto end;
+    }
+    header->length = length;
+
+    status_vcos = vcos_semaphore_trywait(&ctx->sem_capture_next_frame);
+    if (status_vcos == VCOS_SUCCESS) {
+        /* Still need to capture. */
+        status_vcos = vcos_semaphore_post(&ctx->sem_capture_next_frame);
+        if (status_vcos != VCOS_SUCCESS) {
+            print_error("Posting semaphore failed: 0x%08x", status_vcos);
             goto end;
         }
+    } else if (status_vcos == VCOS_EAGAIN) {
+        /* No more capture request for now; the frame is ready. */
+        status_vcos = vcos_semaphore_post(&ctx->sem_is_frame_ready);
+        if (status_vcos != VCOS_SUCCESS) {
+            print_error("Posting semaphore failed: 0x%08x", status_vcos);
+            goto end;
+        }
+    } else {
+        print_error("Try-waiting for semaphore failed: 0x%08x", status_vcos);
+        goto end;
     }
 
 end:
     ctx->header = header;
-    vcos_semaphore_post(&ctx->sem_header_set);
 }
 
 int rpigrafx_config_camera_frame(const int32_t camera_number,
@@ -263,7 +283,7 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
         ret = 1;
         goto end;
     }
-    status_vcos = vcos_semaphore_create(&ctx->sem_header_set, "header_set", 0);
+    status_vcos = vcos_semaphore_create(&ctx->sem_is_frame_ready, "is_frame_ready", 0);
     if (status_vcos != VCOS_SUCCESS) {
         print_error("Failed to create semaphore: 0x%08x", status_vcos);
         ret = 1;
@@ -311,19 +331,56 @@ int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
         ret = 1;
         goto end;
     }
-
-    status = config_port(render->input[0], isp_config->encoding,
-                         isp_config->width, isp_config->height);
-    if (status != MMAL_SUCCESS) {
+    {
+        MMAL_PORT_T *control = render->control;
+        status = mmal_port_enable(control, callback_control);
+        if (status != MMAL_SUCCESS) {
+            print_error("Enabling control port of render failed: 0x%08x\n", status);
+            ret = 1;
+            goto end;
+        }
     }
+    {
+        MMAL_PORT_T *input = render->input[0];
 
-    status = mmal_util_set_display_region(render->input[0], &region);
+        status = config_port(input, isp_config->encoding,
+                             isp_config->width, isp_config->height);
+        if (status != MMAL_SUCCESS) {
+            print_error("Configuring of "
+                        "render component failed: 0x%08x", status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_util_set_display_region(input, &region);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting display region of "
+                        "render component failed: 0x%08x", status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_boolean(input, MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting zero-copy on "
+                        "render component failed: 0x%08x", status);
+            ret = 1;
+            goto end;
+        }
+    }
+    status = mmal_component_enable(render);
     if (status != MMAL_SUCCESS) {
-        print_error("Setting display region of "
-                    "render component failed: 0x%08x", status);
+        print_error("Enabling render component failed: 0x%08x", status);
         ret = 1;
         goto end;
     }
+    status = mmal_port_enable(render->input[0], callback_control);
+    if (status != MMAL_SUCCESS) {
+        print_error("Enabling render input port failed: 0x%08x", status);
+        ret = 1;
+        goto end;
+    }
+
 
 end:
     fcp->render = render;
@@ -676,24 +733,75 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
 {
     struct callback_context *ctx = fcp->ctx;
     int ret = 0;
+    VCOS_STATUS_T status_vcos;
 
-    vcos_semaphore_post(&ctx->sem_capture_next_frame);
+    /* Try to wait for sem.
+     * SUCCESS: Frame was ready. Invalidate it here.
+     * EAGAIN:  Frame was not ready yet. Just ignore it.
+     * others:  Errors.
+     */
+    status_vcos = vcos_semaphore_trywait(&ctx->sem_is_frame_ready);
+    if (status_vcos != VCOS_SUCCESS && status_vcos != VCOS_EAGAIN) {
+        print_error("Try-waiting for semaphore failed: 0x%08x", status_vcos);
+        ret = 1;
+        goto end;
+    }
+    status_vcos = vcos_semaphore_post(&ctx->sem_capture_next_frame);
+    if (status_vcos != VCOS_SUCCESS) {
+        print_error("Posting semaphore failed: 0x%08x", status_vcos);
+        ret = 1;
+        goto end;
+    }
 
+end:
     return ret;
+}
+
+static void wait_for_frame(rpigrafx_frame_config_t *fcp)
+{
+    int ret = 0;
+    VCOS_STATUS_T status_vcos;
+
+    status_vcos = vcos_semaphore_trywait(&fcp->ctx->sem_is_frame_ready);
+    switch (status_vcos) {
+        case VCOS_SUCCESS: {
+            /* Frame is ready. Post semaphore for other clients. */
+            status_vcos = vcos_semaphore_post(&fcp->ctx->sem_is_frame_ready);
+            if (status_vcos != VCOS_SUCCESS) {
+                print_error("Posting semaphore failed: 0x%08x", status_vcos);
+                ret = 1;
+                goto end;
+            }
+            break;
+        }
+        case VCOS_EAGAIN: {
+            /* Frame is not ready. Wait for it. */
+            status_vcos = vcos_semaphore_wait(&fcp->ctx->sem_is_frame_ready);
+            if (status_vcos != VCOS_SUCCESS) {
+                print_error("Waiting for semaphore failed: 0x%08x", status_vcos);
+                ret = 1;
+                goto end;
+            }
+            break;
+        }
+        default: {
+            print_error("Try-waiting for semaphore failed: 0x%08x", status_vcos);
+            ret = 1;
+            goto end;
+            break;
+        }
+    }
+
+end:
+    (void) ret;
 }
 
 void* rpigrafx_get_frame(rpigrafx_frame_config_t *fcp)
 {
     struct callback_context *ctx = fcp->ctx;
     void *ret = NULL;
-    VCOS_STATUS_T status_vcos;
 
-    status_vcos = vcos_semaphore_trywait(&ctx->sem_header_set);
-    if (status_vcos != VCOS_SUCCESS && status_vcos != VCOS_EAGAIN) {
-        print_error("Try-waiting for semaphore failed: 0x%08x", status_vcos);
-        ret = NULL;
-        goto end;
-    }
+    wait_for_frame(fcp);
 
     if (ctx->status != MMAL_SUCCESS) {
         print_error("Getting output buffer of isp %d,%d failed: 0x%08x",
@@ -720,15 +828,9 @@ int rpigrafx_render_frame(rpigrafx_frame_config_t *fcp)
     struct callback_context *ctx = fcp->ctx;
     uint32_t flags_orig;
     MMAL_STATUS_T status;
-    VCOS_STATUS_T status_vcos;
     int ret = 0;
 
-    status_vcos = vcos_semaphore_trywait(&ctx->sem_header_set);
-    if (status_vcos != VCOS_SUCCESS && status_vcos != VCOS_EAGAIN) {
-        print_error("Try-waiting for semaphore failed: 0x%08x", status_vcos);
-        ret = 0;
-        goto end;
-    }
+    wait_for_frame(fcp);
 
     if (ctx->status != MMAL_SUCCESS) {
         print_error("Getting output buffer of isp %d,%d failed: 0x%08x",
