@@ -782,6 +782,13 @@ static void wait_for_frame(rpigrafx_frame_config_t *fcp)
                 ret = 1;
                 goto end;
             }
+            /* And post it for other clients. */
+            status_vcos = vcos_semaphore_post(&fcp->ctx->sem_is_frame_ready);
+            if (status_vcos != VCOS_SUCCESS) {
+                print_error("Posting semaphore failed: 0x%08x", status_vcos);
+                ret = 1;
+                goto end;
+            }
             break;
         }
         default: {
