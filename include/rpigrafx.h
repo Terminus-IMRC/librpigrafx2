@@ -8,7 +8,7 @@
     struct callback_context {
         MMAL_STATUS_T status;
         MMAL_BUFFER_HEADER_T *header;
-        VCOS_SEMAPHORE_T sem_capture_next_frame, sem_is_frame_ready;
+        VCOS_SEMAPHORE_T sem;
     };
 
     typedef struct {
@@ -16,7 +16,6 @@
         unsigned splitter_output_port_index;
         _Bool is_zero_copy_rendering;
         struct callback_context *ctx;
-        MMAL_COMPONENT_T *render;
     } rpigrafx_frame_config_t;
 
     int rpigrafx_init()     __attribute__((constructor));
