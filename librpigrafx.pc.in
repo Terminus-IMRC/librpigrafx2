@@ -1,0 +1,11 @@
+prefix=@prefix@
+exec_prefix=@exec_prefix@
+libdir=@libdir@
+includedir=@includedir@
+
+Name: @PACKAGE@
+Description: Graphic library for Raspberry Pi
+Version: @VERSION@
+Requires: bcm_host mmal
+Cflags: -I${includedir}
+Libs: -L${libdir} -lrpigrafx
