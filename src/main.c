@@ -10,7 +10,7 @@
 #include "rpigrafx.h"
 #include "local.h"
 
-struct called called = {
+struct priv_rpigrafx_called priv_rpigrafx_called = {
     .main = 0,
     .mmal = 0
 };
@@ -19,7 +19,7 @@ int rpigrafx_init()
 {
     int ret = 0;
 
-    if (called.main != 0)
+    if (priv_rpigrafx_called.main != 0)
         goto end;
 
     ret = priv_rpigrafx_mmal_init();
@@ -29,7 +29,7 @@ int rpigrafx_init()
     }
 
 end:
-    called.main ++;
+    priv_rpigrafx_called.main ++;
     return ret;
 }
 
@@ -37,7 +37,7 @@ int rpigrafx_finalize()
 {
     int ret = 0;
 
-    if (called.main != 1)
+    if (priv_rpigrafx_called.main != 1)
         goto end;
 
     ret = priv_rpigrafx_mmal_finalize();
@@ -47,6 +47,6 @@ int rpigrafx_finalize()
     }
 
 end:
-    called.main --;
+    priv_rpigrafx_called.main --;
     return ret;
 }

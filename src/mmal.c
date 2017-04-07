@@ -69,7 +69,7 @@ int priv_rpigrafx_mmal_init()
     int ret = 0;
     MMAL_STATUS_T status;
 
-    if (called.mmal != 0)
+    if (priv_rpigrafx_called.mmal != 0)
         goto end;
 
     for (i = 0; i < MAX_CAMERAS; i ++) {
@@ -137,7 +137,7 @@ int priv_rpigrafx_mmal_init()
     }
 
 end:
-    called.mmal ++;
+    priv_rpigrafx_called.mmal ++;
 
     return ret;
 }
@@ -147,7 +147,7 @@ int priv_rpigrafx_mmal_finalize()
     int i, j;
     int ret = 0;
 
-    if (called.mmal != 1)
+    if (priv_rpigrafx_called.mmal != 1)
         goto skip;
 
     for (i = 0; i < MAX_CAMERAS; i ++) {
@@ -162,7 +162,7 @@ int priv_rpigrafx_mmal_finalize()
     }
 
 skip:
-    called.mmal --;
+    priv_rpigrafx_called.mmal --;
     return ret;
 }
 

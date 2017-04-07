@@ -10,9 +10,9 @@
 #ifndef LOCAL_H
 #define LOCAL_H
 
-    struct called {
+    struct priv_rpigrafx_called {
         int main, mmal;
-    } called;
+    } priv_rpigrafx_called;
 
 #define print_error(fmt, ...) print_error_core(__FILE__, __LINE__, __func__, \
                                                fmt, ##__VA_ARGS__)
