@@ -210,12 +210,6 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
         goto end;
     }
 
-    if (encoding != MMAL_ENCODING_RGBA) {
-        print_error("Only RGBA is supported for now");
-        ret = 1;
-        goto end;
-    }
-
     /*
      * Only set use flag here.
      * cameras_config[camera_number].{width,height}
