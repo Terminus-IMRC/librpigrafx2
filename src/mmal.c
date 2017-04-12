@@ -549,7 +549,7 @@ end:
     return ret;
 }
 
-static int setup_cp_render(const int i, const int j, const int32_t width, const int32_t height)
+static int setup_cp_render(const int i, const int j)
 {
     MMAL_STATUS_T status;
     int ret = 0;
@@ -588,7 +588,10 @@ static int setup_cp_render(const int i, const int j, const int32_t width, const 
             goto end;
         }
 
-        status = config_port(input, MMAL_ENCODING_RGBA, width, height);
+        status = config_port(input,
+                             isps_config[i][j].encoding,
+                             isps_config[i][j].width,
+                             isps_config[i][j].height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "render %d input %d failed: 0x%08x", i, j, status);
@@ -735,7 +738,7 @@ int rpigrafx_finish_config()
         for (j = 0; j < len; j ++) {
             if ((ret = setup_cp_isp(i, j, max_width, max_height)))
                 goto end;
-            if ((ret = setup_cp_render(i, j, max_width, max_height)))
+            if ((ret = setup_cp_render(i, j)))
                 goto end;
         }
         if ((ret = connect_ports(i, len)))
