@@ -281,10 +281,435 @@ int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
     return ret;
 }
 
+static int setup_cp_camera(const int i, const int32_t width, const int32_t height)
+{
+    MMAL_STATUS_T status;
+    int ret = 0;
+
+    status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA, &cp_cameras[i]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Creating camera component of camera %d failed: 0x%08x",
+                    i, status);
+        ret = 1;
+        goto end;
+    }
+    {
+        MMAL_PORT_T *control = mmal_util_get_port(cp_cameras[i],
+                                                  MMAL_PORT_TYPE_CONTROL, 0);
+
+        if (control == NULL) {
+            print_error("Getting control port of camera %d failed", i);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_int32(control, MMAL_PARAMETER_CAMERA_NUM, i);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting camera_num of camera %d failed: 0x%08x", i, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_enable(control, callback_control);
+        if (status != MMAL_SUCCESS) {
+            print_error("Enabling control port of camera %d failed: 0x%08x",
+                        i, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    {
+        MMAL_PORT_T *output = mmal_util_get_port(cp_cameras[i],
+                                                 MMAL_PORT_TYPE_OUTPUT, 0);
+
+        if (output == NULL) {
+            print_error("Getting output port of camera %d failed", i);
+            ret = 1;
+            goto end;
+        }
+
+        status = config_port(output, MMAL_ENCODING_RGBA, width, height);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting format of camera %d failed: 0x%08x", i, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_boolean(output,
+                                            MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting zero-copy on camera %d failed: 0x%08x", i, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    status = mmal_component_enable(cp_cameras[i]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Enabling camera component of camera %d failed: 0x%08x",
+                    i, status);
+        ret = 1;
+        goto end;
+    }
+
+end:
+    return ret;
+}
+
+static int setup_cp_splitter(const int i, const int len, const int32_t width, const int32_t height)
+{
+    int j;
+    MMAL_STATUS_T status;
+    int ret = 0;
+
+    status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_SPLITTER, &cp_splitters[i]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Creating splitter component of camera %d failed: 0x%08x",
+                    i, status);
+        ret = 1;
+        goto end;
+    }
+    {
+        MMAL_PORT_T *control = mmal_util_get_port(cp_splitters[i],
+                                                  MMAL_PORT_TYPE_CONTROL, 0);
+
+        if (control == NULL) {
+            print_error("Getting control port of splitter %d failed", i);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_enable(control, callback_control);
+        if (status != MMAL_SUCCESS) {
+            print_error("Enabling control port of splitter %d failed: 0x%08x",
+                        i, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    {
+        MMAL_PORT_T *input = mmal_util_get_port(cp_splitters[i],
+                                                MMAL_PORT_TYPE_INPUT, 0);
+
+        if (input == NULL) {
+            print_error("Getting input port of splitter %d failed", i);
+            ret = 1;
+            goto end;
+        }
+
+        status = config_port(input, MMAL_ENCODING_OPAQUE, width, height);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting format of " \
+                        "splitter %d input failed: 0x%08x", i, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_boolean(input,
+                                            MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting zero-copy on " \
+                        "splitter %d input failed: 0x%08x", i, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    for (j = 0; j < len; j ++) {
+        MMAL_PORT_T *output = mmal_util_get_port(cp_splitters[i],
+                                                 MMAL_PORT_TYPE_OUTPUT, j);
+
+        if (output == NULL) {
+            print_error("Getting output port of splitter %d,%d failed", i, j);
+            ret = 1;
+            goto end;
+        }
+
+        status = config_port(output, MMAL_ENCODING_RGBA, width, height);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting format of " \
+                        "splitter %d output %d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_boolean(output,
+                                            MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting zero-copy on " \
+                        "splitter %d output %d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    status = mmal_component_enable(cp_splitters[i]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Enabling splitter component of " \
+                    "camera %d failed: 0x%08x", i, status);
+        ret = 1;
+        goto end;
+    }
+
+end:
+    return ret;
+}
+
+static int setup_cp_isp(const int i, const int j, const int32_t width, const int32_t height)
+{
+    MMAL_STATUS_T status;
+    int ret = 0;
+
+    status = mmal_component_create("vc.ril.isp", &cp_isps[i][j]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Creating isp component %d,%d failed: 0x%08x", i, j, status);
+        ret = 1;
+        goto end;
+    }
+    {
+        MMAL_PORT_T *control = mmal_util_get_port(cp_isps[i][j],
+                                                  MMAL_PORT_TYPE_CONTROL, 0);
+
+        if (control == NULL) {
+            print_error("Getting control port of isp %d,%d failed", i, j);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_enable(control, callback_control);
+        if (status != MMAL_SUCCESS) {
+            print_error("Enabling control port of " \
+                        "isp %d,%d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    {
+        MMAL_PORT_T *input = mmal_util_get_port(cp_isps[i][j],
+                                                MMAL_PORT_TYPE_INPUT, 0);
+
+        if (input == NULL) {
+            print_error("Getting input port of isp %d,%d failed", i, j);
+            ret = 1;
+            goto end;
+        }
+
+        status = config_port(input, MMAL_ENCODING_RGBA, width, height);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting format of " \
+                        "isp %d input %d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_boolean(input,
+                                            MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting zero-copy on " \
+                        "isp %d input %d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    {
+        MMAL_PORT_T *output = mmal_util_get_port(cp_isps[i][j],
+                                                 MMAL_PORT_TYPE_OUTPUT, 0);
+
+        if (output == NULL) {
+            print_error("Getting output port of isp %d,%d failed", i, j);
+            ret = 1;
+            goto end;
+        }
+
+        status = config_port(output,
+                             isps_config[i][j].encoding,
+                             isps_config[i][j].width,
+                             isps_config[i][j].height);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting format of " \
+                        "isp %d output %d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_boolean(output,
+                                            MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting zero-copy on " \
+                        "isp %d output %d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    status = mmal_component_enable(cp_isps[i][j]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Enabling isp component %d,%d failed: 0x%08x", i, j, status);
+        ret = 1;
+        goto end;
+    }
+
+end:
+    return ret;
+}
+
+static int setup_cp_render(const int i, const int j, const int32_t width, const int32_t height)
+{
+    MMAL_STATUS_T status;
+    int ret = 0;
+
+    status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &cp_renders[i][j]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Creating render component %d,%d failed: 0x%08x", i, j, status);
+        ret = 1;
+        goto end;
+    }
+    {
+        MMAL_PORT_T *control = mmal_util_get_port(cp_renders[i][j],
+                                                  MMAL_PORT_TYPE_CONTROL, 0);
+
+        if (control == NULL) {
+            print_error("Getting control port of render %d,%d failed", i, j);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_enable(control, callback_control);
+        if (status != MMAL_SUCCESS) {
+            print_error("Enabling control port of " \
+                        "render %d,%d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    {
+        MMAL_PORT_T *input = mmal_util_get_port(cp_renders[i][j],
+                                                MMAL_PORT_TYPE_INPUT, 0);
+
+        if (input == NULL) {
+            print_error("Getting input port of render %d,%d failed", i, j);
+            ret = 1;
+            goto end;
+        }
+
+        status = config_port(input, MMAL_ENCODING_RGBA, width, height);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting format of " \
+                        "render %d input %d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_util_set_display_region(input, &renders_config[i][j].region);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting region of " \
+                        "render %d input %d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_boolean(input,
+                                            MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting zero-copy on " \
+                        "isp %d input %d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    status = mmal_component_enable(cp_renders[i][j]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Enabling render component %d,%d failed: 0x%08x", i, j, status);
+        ret = 1;
+        goto end;
+    }
+
+end:
+    return ret;
+}
+
+static int connect_ports(const int i, const int len)
+{
+    int j;
+    MMAL_STATUS_T status;
+    int ret = 0;
+
+    status = mmal_connection_create(&conn_camera_splitters[i],
+                                    cp_cameras[i]->output[0],
+                                    cp_splitters[i]->input[0],
+                                    MMAL_CONNECTION_FLAG_TUNNELLING);
+    if (status != MMAL_SUCCESS) {
+        print_error("Connecting " \
+                    "camera and splitter ports %d failed: 0x%08x", i, status);
+        ret = 1;
+        goto end;
+    }
+    for (j = 0; j < len; j ++) {
+        status = mmal_connection_create(&conn_splitters_isps[i][j],
+                                        cp_splitters[i]->output[j],
+                                        cp_isps[i][j]->input[0],
+                                        MMAL_CONNECTION_FLAG_TUNNELLING);
+        if (status != MMAL_SUCCESS) {
+            print_error("Connecting " \
+                        "splitter and isp ports %d,%d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+        status = mmal_connection_create(&conn_isps_renders[i][j],
+                                        cp_isps[i][j]->output[0],
+                                        cp_renders[i][j]->input[0],
+                                        0);
+        if (status != MMAL_SUCCESS) {
+            print_error("Connecting " \
+                        "isp and render ports %d,%d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+    }
+
+    for (j = 0; j < len; j ++) {
+        conn_isps_renders[i][j]->user_data = (void*) ctxs[i][j];
+        conn_isps_renders[i][j]->callback = callback_conn;
+        status = mmal_connection_enable(conn_isps_renders[i][j]);
+        if (status != MMAL_SUCCESS) {
+            print_error("Enabling connection between " \
+                        "splitter and isp %d,%d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+        status = mmal_connection_enable(conn_splitters_isps[i][j]);
+        if (status != MMAL_SUCCESS) {
+            print_error("Enabling connection between " \
+                        "splitter and isp %d,%d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    status = mmal_connection_enable(conn_camera_splitters[i]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Enabling connection between " \
+                    "camera and splitter %d,%d failed: 0x%08x", i, j, status);
+        ret = 1;
+        goto end;
+    }
+
+    for (j = 0; j < len; j ++) {
+        MMAL_BUFFER_HEADER_T *header = NULL;
+        MMAL_CONNECTION_T *conn = conn_isps_renders[i][j];
+        while ((header = mmal_queue_get(conn->pool->queue)) != NULL) {
+            status = mmal_port_send_buffer(conn->out, header);
+            if (status != MMAL_SUCCESS) {
+                print_error("Sending pool buffer to "
+                            "isp-render conn %d,%d failed: 0x%08x", status);
+                ret = 1;
+                goto end;
+            }
+        }
+    }
+
+end:
+    return ret;
+}
+
 int rpigrafx_finish_config()
 {
     int i, j;
-    MMAL_STATUS_T status;
     int ret = 0;
 
     for (i = 0; i < num_cameras; i ++) {
@@ -303,387 +728,18 @@ int rpigrafx_finish_config()
             max_height = MMAL_MAX(max_height, isps_config[i][j].height);
         }
 
-        status = mmal_component_create(MMAL_COMPONENT_DEFAULT_CAMERA, &cp_cameras[i]);
-        if (status != MMAL_SUCCESS) {
-            print_error("Creating camera component of camera %d failed: 0x%08x",
-                        i, status);
-            ret = 1;
+        if ((ret = setup_cp_camera(i, max_width, max_height)))
             goto end;
-        }
-        {
-            MMAL_PORT_T *control = mmal_util_get_port(cp_cameras[i],
-                                                      MMAL_PORT_TYPE_CONTROL, 0);
-
-            if (control == NULL) {
-                print_error("Getting control port of camera %d failed", i);
-                ret = 1;
-                goto end;
-            }
-
-            status = mmal_port_parameter_set_int32(control, MMAL_PARAMETER_CAMERA_NUM, i);
-            if (status != MMAL_SUCCESS) {
-                print_error("Setting camera_num of camera %d failed: 0x%08x", i, status);
-                ret = 1;
-                goto end;
-            }
-
-            status = mmal_port_enable(control, callback_control);
-            if (status != MMAL_SUCCESS) {
-                print_error("Enabling control port of camera %d failed: 0x%08x",
-                            i, status);
-                ret = 1;
-                goto end;
-            }
-        }
-        {
-            MMAL_PORT_T *output = mmal_util_get_port(cp_cameras[i],
-                                                     MMAL_PORT_TYPE_OUTPUT, 0);
-
-            if (output == NULL) {
-                print_error("Getting output port of camera %d failed", i);
-                ret = 1;
-                goto end;
-            }
-
-            status = config_port(output, MMAL_ENCODING_RGBA, max_width, max_height);
-            if (status != MMAL_SUCCESS) {
-                print_error("Setting format of camera %d failed: 0x%08x", i, status);
-                ret = 1;
-                goto end;
-            }
-
-            status = mmal_port_parameter_set_boolean(output,
-                                                MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
-            if (status != MMAL_SUCCESS) {
-                print_error("Setting zero-copy on camera %d failed: 0x%08x", i, status);
-                ret = 1;
-                goto end;
-            }
-        }
-        status = mmal_component_enable(cp_cameras[i]);
-        if (status != MMAL_SUCCESS) {
-            print_error("Enabling camera component of camera %d failed: 0x%08x",
-                        i, status);
-            ret = 1;
+        if ((ret = setup_cp_splitter(i, len, max_width, max_height)))
             goto end;
+        for (j = 0; j < len; j ++) {
+            if ((ret = setup_cp_isp(i, j, max_width, max_height)))
+                goto end;
+            if ((ret = setup_cp_render(i, j, max_width, max_height)))
+                goto end;
         }
-
-        status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_SPLITTER, &cp_splitters[i]);
-        if (status != MMAL_SUCCESS) {
-            print_error("Creating splitter component of camera %d failed: 0x%08x",
-                        i, status);
-            ret = 1;
+        if ((ret = connect_ports(i, len)))
             goto end;
-        }
-        {
-            MMAL_PORT_T *control = mmal_util_get_port(cp_splitters[i],
-                                                      MMAL_PORT_TYPE_CONTROL, 0);
-
-            if (control == NULL) {
-                print_error("Getting control port of splitter %d failed", i);
-                ret = 1;
-                goto end;
-            }
-
-            status = mmal_port_enable(control, callback_control);
-            if (status != MMAL_SUCCESS) {
-                print_error("Enabling control port of splitter %d failed: 0x%08x",
-                            i, status);
-                ret = 1;
-                goto end;
-            }
-        }
-        {
-            MMAL_PORT_T *input = mmal_util_get_port(cp_splitters[i],
-                                                    MMAL_PORT_TYPE_INPUT, 0);
-
-            if (input == NULL) {
-                print_error("Getting input port of splitter %d failed", i);
-                ret = 1;
-                goto end;
-            }
-
-            status = config_port(input, MMAL_ENCODING_OPAQUE, max_width, max_height);
-            if (status != MMAL_SUCCESS) {
-                print_error("Setting format of " \
-                            "splitter %d input failed: 0x%08x", i, status);
-                ret = 1;
-                goto end;
-            }
-
-            status = mmal_port_parameter_set_boolean(input,
-                                                MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
-            if (status != MMAL_SUCCESS) {
-                print_error("Setting zero-copy on " \
-                            "splitter %d input failed: 0x%08x", i, status);
-                ret = 1;
-                goto end;
-            }
-        }
-        for (j = 0; j < len; j ++) {
-            MMAL_PORT_T *output = mmal_util_get_port(cp_splitters[i],
-                                                     MMAL_PORT_TYPE_OUTPUT, j);
-
-            if (output == NULL) {
-                print_error("Getting output port of splitter %d,%d failed", i, j);
-                ret = 1;
-                goto end;
-            }
-
-            status = config_port(output, MMAL_ENCODING_RGBA, max_width, max_height);
-            if (status != MMAL_SUCCESS) {
-                print_error("Setting format of " \
-                            "splitter %d output %d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-
-            status = mmal_port_parameter_set_boolean(output,
-                                                MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
-            if (status != MMAL_SUCCESS) {
-                print_error("Setting zero-copy on " \
-                            "splitter %d output %d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-        }
-        status = mmal_component_enable(cp_splitters[i]);
-        if (status != MMAL_SUCCESS) {
-            print_error("Enabling splitter component of " \
-                        "camera %d failed: 0x%08x", i, status);
-            ret = 1;
-            goto end;
-        }
-
-        for (j = 0; j < len; j ++) {
-            status = mmal_component_create("vc.ril.isp", &cp_isps[i][j]);
-            if (status != MMAL_SUCCESS) {
-                print_error("Creating isp component %d,%d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-            {
-                MMAL_PORT_T *control = mmal_util_get_port(cp_isps[i][j],
-                                                          MMAL_PORT_TYPE_CONTROL, 0);
-
-                if (control == NULL) {
-                    print_error("Getting control port of isp %d,%d failed", i, j);
-                    ret = 1;
-                    goto end;
-                }
-
-                status = mmal_port_enable(control, callback_control);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Enabling control port of " \
-                                "isp %d,%d failed: 0x%08x", i, j, status);
-                    ret = 1;
-                    goto end;
-                }
-            }
-            {
-                MMAL_PORT_T *input = mmal_util_get_port(cp_isps[i][j],
-                                                        MMAL_PORT_TYPE_INPUT, 0);
-
-                if (input == NULL) {
-                    print_error("Getting input port of isp %d,%d failed", i, j);
-                    ret = 1;
-                    goto end;
-                }
-
-                status = config_port(input, MMAL_ENCODING_RGBA, max_width, max_height);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Setting format of " \
-                                "isp %d input %d failed: 0x%08x", i, j, status);
-                    ret = 1;
-                    goto end;
-                }
-
-                status = mmal_port_parameter_set_boolean(input,
-                                                    MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Setting zero-copy on " \
-                                "isp %d input %d failed: 0x%08x", i, j, status);
-                    ret = 1;
-                    goto end;
-                }
-            }
-            {
-                MMAL_PORT_T *output = mmal_util_get_port(cp_isps[i][j],
-                                                         MMAL_PORT_TYPE_OUTPUT, 0);
-
-                if (output == NULL) {
-                    print_error("Getting output port of isp %d,%d failed", i, j);
-                    ret = 1;
-                    goto end;
-                }
-
-                status = config_port(output,
-                                     isps_config[i][j].encoding,
-                                     isps_config[i][j].width,
-                                     isps_config[i][j].height);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Setting format of " \
-                                "isp %d output %d failed: 0x%08x", i, j, status);
-                    ret = 1;
-                    goto end;
-                }
-
-                status = mmal_port_parameter_set_boolean(output,
-                                                    MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Setting zero-copy on " \
-                                "isp %d output %d failed: 0x%08x", i, j, status);
-                    ret = 1;
-                    goto end;
-                }
-            }
-            status = mmal_component_enable(cp_isps[i][j]);
-            if (status != MMAL_SUCCESS) {
-                print_error("Enabling isp component %d,%d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-        }
-        for (j = 0; j < len; j ++) {
-            status = mmal_component_create(MMAL_COMPONENT_DEFAULT_VIDEO_RENDERER, &cp_renders[i][j]);
-            if (status != MMAL_SUCCESS) {
-                print_error("Creating render component %d,%d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-            {
-                MMAL_PORT_T *control = mmal_util_get_port(cp_renders[i][j],
-                                                          MMAL_PORT_TYPE_CONTROL, 0);
-
-                if (control == NULL) {
-                    print_error("Getting control port of render %d,%d failed", i, j);
-                    ret = 1;
-                    goto end;
-                }
-
-                status = mmal_port_enable(control, callback_control);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Enabling control port of " \
-                                "render %d,%d failed: 0x%08x", i, j, status);
-                    ret = 1;
-                    goto end;
-                }
-            }
-            {
-                MMAL_PORT_T *input = mmal_util_get_port(cp_renders[i][j],
-                                                        MMAL_PORT_TYPE_INPUT, 0);
-
-                if (input == NULL) {
-                    print_error("Getting input port of render %d,%d failed", i, j);
-                    ret = 1;
-                    goto end;
-                }
-
-                status = config_port(input, MMAL_ENCODING_RGBA, max_width, max_height);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Setting format of " \
-                                "render %d input %d failed: 0x%08x", i, j, status);
-                    ret = 1;
-                    goto end;
-                }
-
-                status = mmal_util_set_display_region(input, &renders_config[i][j].region);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Setting region of " \
-                                "render %d input %d failed: 0x%08x", i, j, status);
-                    ret = 1;
-                    goto end;
-                }
-
-                status = mmal_port_parameter_set_boolean(input,
-                                                    MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Setting zero-copy on " \
-                                "isp %d input %d failed: 0x%08x", i, j, status);
-                    ret = 1;
-                    goto end;
-                }
-            }
-            status = mmal_component_enable(cp_renders[i][j]);
-            if (status != MMAL_SUCCESS) {
-                print_error("Enabling render component %d,%d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-        }
-
-        status = mmal_connection_create(&conn_camera_splitters[i],
-                                        cp_cameras[i]->output[0],
-                                        cp_splitters[i]->input[0],
-                                        MMAL_CONNECTION_FLAG_TUNNELLING);
-        if (status != MMAL_SUCCESS) {
-            print_error("Connecting " \
-                        "camera and splitter ports %d failed: 0x%08x", i, status);
-            ret = 1;
-            goto end;
-        }
-        for (j = 0; j < len; j ++) {
-            status = mmal_connection_create(&conn_splitters_isps[i][j],
-                                            cp_splitters[i]->output[j],
-                                            cp_isps[i][j]->input[0],
-                                            MMAL_CONNECTION_FLAG_TUNNELLING);
-            if (status != MMAL_SUCCESS) {
-                print_error("Connecting " \
-                            "splitter and isp ports %d,%d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-            status = mmal_connection_create(&conn_isps_renders[i][j],
-                                            cp_isps[i][j]->output[0],
-                                            cp_renders[i][j]->input[0],
-                                            0);
-            if (status != MMAL_SUCCESS) {
-                print_error("Connecting " \
-                            "isp and render ports %d,%d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-        }
-
-        for (j = 0; j < len; j ++) {
-            conn_isps_renders[i][j]->user_data = (void*) ctxs[i][j];
-            conn_isps_renders[i][j]->callback = callback_conn;
-            status = mmal_connection_enable(conn_isps_renders[i][j]);
-            if (status != MMAL_SUCCESS) {
-                print_error("Enabling connection between " \
-                            "splitter and isp %d,%d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-            status = mmal_connection_enable(conn_splitters_isps[i][j]);
-            if (status != MMAL_SUCCESS) {
-                print_error("Enabling connection between " \
-                            "splitter and isp %d,%d failed: 0x%08x", i, j, status);
-                ret = 1;
-                goto end;
-            }
-        }
-        status = mmal_connection_enable(conn_camera_splitters[i]);
-        if (status != MMAL_SUCCESS) {
-            print_error("Enabling connection between " \
-                        "camera and splitter %d,%d failed: 0x%08x", i, j, status);
-            ret = 1;
-            goto end;
-        }
-
-        for (j = 0; j < len; j ++) {
-            MMAL_BUFFER_HEADER_T *header = NULL;
-            MMAL_CONNECTION_T *conn = conn_isps_renders[i][j];
-            while ((header = mmal_queue_get(conn->pool->queue)) != NULL) {
-                status = mmal_port_send_buffer(conn->out, header);
-                if (status != MMAL_SUCCESS) {
-                    print_error("Sending pool buffer to "
-                                "isp-render conn %d,%d failed: 0x%08x", status);
-                    ret = 1;
-                    goto end;
-                }
-            }
-        }
     }
 
 end:
