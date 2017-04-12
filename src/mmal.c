@@ -20,17 +20,37 @@
 
 static int32_t num_cameras = 0;
 
+/*
+ * When camera->output[0] is used as a capture port:
+ * camera [0] --- [0] video_splitter [0] --- [0] isp [0] --- [0] video_render
+ *                                   [1] --- [0] isp [0] --- [0] video_render
+ *                                   [2] --- [0] isp [0] --- [0] video_render
+ *                                   [3] --- [0] isp [0] --- [0] video_render
+ *
+ * When vc.ril.camera->output[2] is used as a capture port,
+ * the preview port (camera->output[0]) is still used for AWB processing:
+ * camera [0] --- [0] null_sink
+ *        [2] --- [0] video_splitter [0] --- [0] isp [0] --- [0] video_render
+ *                                   [1] --- [0] isp [0] --- [0] video_render
+ *                                   [2] --- [0] isp [0] --- [0] video_render
+ *                                   [3] --- [0] isp [0] --- [0] video_render
+ */
+
 static MMAL_COMPONENT_T *cp_cameras[MAX_CAMERAS];
 static struct cameras_config {
     _Bool is_used;
     int32_t width, height;
     int32_t max_width, max_height;
+    unsigned camera_output_port_index;
+    _Bool use_camera_capture_port;
 } cameras_config[MAX_CAMERAS];
 
 static MMAL_COMPONENT_T *cp_splitters[MAX_CAMERAS];
 static struct splitters_config {
     int next_output_idx;
 } splitters_config[MAX_CAMERAS];
+
+static MMAL_COMPONENT_T *cp_nulls[MAX_CAMERAS];
 
 static MMAL_COMPONENT_T *cp_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 static struct isps_config {
@@ -44,6 +64,7 @@ static struct renders_config {
     MMAL_DISPLAYREGION_T region;
 } renders_config[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
+static MMAL_CONNECTION_T *conn_camera_nulls[MAX_CAMERAS];
 static MMAL_CONNECTION_T *conn_camera_splitters[MAX_CAMERAS];
 static MMAL_CONNECTION_T *conn_splitters_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 static MMAL_CONNECTION_T *conn_isps_renders[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
@@ -75,6 +96,9 @@ int priv_rpigrafx_mmal_init()
     for (i = 0; i < MAX_CAMERAS; i ++) {
         cp_cameras[i] = NULL;
         cameras_config[i].is_used = 0;
+        if ((ret = rpigrafx_config_camera_port(i,
+                                               RPIGRAFX_CAMERA_PORT_PREVIEW)))
+            goto end;
 
         cp_splitters[i] = NULL;
         splitters_config[i].next_output_idx = 0;
@@ -257,6 +281,33 @@ end:
     return ret;
 }
 
+int rpigrafx_config_camera_port(const int32_t camera_number,
+                                const rpigrafx_camera_port_t camera_port)
+{
+    struct cameras_config *cfg = &cameras_config[camera_number];
+    int ret = 0;
+
+    switch (camera_port) {
+        case RPIGRAFX_CAMERA_PORT_PREVIEW:
+            cfg->camera_output_port_index = 0;
+            cfg->use_camera_capture_port = 0;
+            break;
+        case RPIGRAFX_CAMERA_PORT_CAPTURE:
+            cfg->camera_output_port_index = 2;
+            cfg->use_camera_capture_port = !0;
+            break;
+        default:
+            print_error("Unknown rpigrafx_camera_port_t value: %d\n",
+                        camera_port);
+            ret = 1;
+            goto end;
+            break;
+    }
+
+end:
+    return ret;
+}
+
 int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
                            const int32_t x, const int32_t y,
                            const int32_t width, const int32_t height,
@@ -281,8 +332,10 @@ int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
     return ret;
 }
 
-static int setup_cp_camera(const int i, const int32_t width, const int32_t height)
+static int setup_cp_camera(const int i,
+                           const int32_t width, const int32_t height)
 {
+    const unsigned camera_output_port_index = cameras_config[i].camera_output_port_index;
     MMAL_STATUS_T status;
     int ret = 0;
 
@@ -320,10 +373,12 @@ static int setup_cp_camera(const int i, const int32_t width, const int32_t heigh
     }
     {
         MMAL_PORT_T *output = mmal_util_get_port(cp_cameras[i],
-                                                 MMAL_PORT_TYPE_OUTPUT, 0);
+                                                 MMAL_PORT_TYPE_OUTPUT,
+                                                 camera_output_port_index);
 
         if (output == NULL) {
-            print_error("Getting output port of camera %d failed", i);
+            print_error("Getting output %d of camera %d failed",
+                        camera_output_port_index, i);
             ret = 1;
             goto end;
         }
@@ -355,7 +410,77 @@ end:
     return ret;
 }
 
-static int setup_cp_splitter(const int i, const int len, const int32_t width, const int32_t height)
+static int setup_cp_null(const int i,
+                         const int32_t width, const int32_t height)
+{
+    MMAL_STATUS_T status;
+    int ret = 0;
+
+    status = mmal_component_create("vc.ril.null_sink", &cp_nulls[i]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Creating null component of camera %d failed: 0x%08x",
+                    i, status);
+        ret = 1;
+        goto end;
+    }
+    {
+        MMAL_PORT_T *control = mmal_util_get_port(cp_nulls[i],
+                                                  MMAL_PORT_TYPE_CONTROL, 0);
+
+        if (control == NULL) {
+            print_error("Getting control port of null %d failed", i);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_enable(control, callback_control);
+        if (status != MMAL_SUCCESS) {
+            print_error("Enabling control port of null %d failed: 0x%08x",
+                        i, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    {
+        MMAL_PORT_T *input = mmal_util_get_port(cp_nulls[i],
+                                                MMAL_PORT_TYPE_INPUT, 0);
+
+        if (input == NULL) {
+            print_error("Getting input port of null %d failed", i);
+            ret = 1;
+            goto end;
+        }
+
+        status = config_port(input, MMAL_ENCODING_RGBA, width, height);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting format of null %d failed: 0x%08x", i, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_boolean(input,
+                                                 MMAL_PARAMETER_ZERO_COPY,
+                                                 MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting zero-copy on null %d failed: 0x%08x", i, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    status = mmal_component_enable(cp_nulls[i]);
+    if (status != MMAL_SUCCESS) {
+        print_error("Enabling null component of camera %d failed: 0x%08x",
+                    i, status);
+        ret = 1;
+        goto end;
+    }
+
+end:
+    return ret;
+}
+
+static int setup_cp_splitter(const int i, const int len,
+                             const int32_t width, const int32_t height)
 {
     int j;
     MMAL_STATUS_T status;
@@ -452,7 +577,8 @@ end:
     return ret;
 }
 
-static int setup_cp_isp(const int i, const int j, const int32_t width, const int32_t height)
+static int setup_cp_isp(const int i, const int j,
+                        const int32_t width, const int32_t height)
 {
     MMAL_STATUS_T status;
     int ret = 0;
@@ -630,11 +756,25 @@ end:
 static int connect_ports(const int i, const int len)
 {
     int j;
+    struct cameras_config *cfg = &cameras_config[i];
     MMAL_STATUS_T status;
     int ret = 0;
 
+    if (cfg->use_camera_capture_port) {
+        status = mmal_connection_create(&conn_camera_nulls[i],
+                                        cp_cameras[i]->output[cfg->camera_output_port_index],
+                                        cp_nulls[i]->input[0],
+                                        MMAL_CONNECTION_FLAG_TUNNELLING);
+        if (status != MMAL_SUCCESS) {
+            print_error("Connecting " \
+                        "camera and null ports %d failed: 0x%08x", i, status);
+            ret = 1;
+            goto end;
+        }
+    }
+
     status = mmal_connection_create(&conn_camera_splitters[i],
-                                    cp_cameras[i]->output[0],
+                                    cp_cameras[i]->output[cfg->camera_output_port_index],
                                     cp_splitters[i]->input[0],
                                     MMAL_CONNECTION_FLAG_TUNNELLING);
     if (status != MMAL_SUCCESS) {
@@ -719,6 +859,7 @@ int rpigrafx_finish_config()
         int len;
         /* Maximum width/height of the requested frames. */
         int32_t max_width, max_height;
+        struct cameras_config *cfg = &cameras_config[i];
 
         if (!cameras_config[i].is_used)
             continue;
@@ -735,6 +876,9 @@ int rpigrafx_finish_config()
             goto end;
         if ((ret = setup_cp_splitter(i, len, max_width, max_height)))
             goto end;
+        if (cfg->use_camera_capture_port)
+            if ((ret = setup_cp_null(i, max_width, max_height)))
+                goto end;
         for (j = 0; j < len; j ++) {
             if ((ret = setup_cp_isp(i, j, max_width, max_height)))
                 goto end;
@@ -752,6 +896,7 @@ end:
 int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
 {
     struct callback_context *ctx = fcp->ctx;
+    struct cameras_config *cfg = &cameras_config[fcp->camera_number];
     int ret = 0;
     MMAL_BUFFER_HEADER_T *header = NULL;
     MMAL_CONNECTION_T *conn = conn_isps_renders[fcp->camera_number][fcp->splitter_output_port_index];
@@ -759,6 +904,22 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
     while ((header = mmal_queue_get(conn->pool->queue)) != NULL) {
         mmal_port_send_buffer(conn->out, header);
     }
+
+    if (cfg->use_camera_capture_port) {
+        MMAL_STATUS_T status;
+
+        status = mmal_port_parameter_set_boolean(cp_cameras[fcp->camera_number]->output[cfg->camera_output_port_index],
+                                                 MMAL_PARAMETER_CAPTURE, MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting capture to "
+                        "camera %d output %d failed: 0x%08x\n",
+                        fcp->camera_number, cfg->camera_output_port_index,
+                        status);
+            ret = 1;
+            goto end;
+        }
+    }
+
     ctx->header = mmal_queue_wait(conn->queue);
 
 end:
