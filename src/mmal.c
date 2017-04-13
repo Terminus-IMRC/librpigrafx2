@@ -17,6 +17,8 @@
 
 #define MAX_CAMERAS          MMAL_PARAMETER_CAMERA_INFO_MAX_CAMERAS
 #define NUM_SPLITTER_OUTPUTS 4
+#define CAMERA_PREVIEW_PORT 0
+#define CAMERA_CAPTURE_PORT 2
 
 static int32_t num_cameras = 0;
 
@@ -289,11 +291,11 @@ int rpigrafx_config_camera_port(const int32_t camera_number,
 
     switch (camera_port) {
         case RPIGRAFX_CAMERA_PORT_PREVIEW:
-            cfg->camera_output_port_index = 0;
+            cfg->camera_output_port_index = CAMERA_PREVIEW_PORT;
             cfg->use_camera_capture_port = 0;
             break;
         case RPIGRAFX_CAMERA_PORT_CAPTURE:
-            cfg->camera_output_port_index = 2;
+            cfg->camera_output_port_index = CAMERA_CAPTURE_PORT;
             cfg->use_camera_capture_port = !0;
             break;
         default:
@@ -333,7 +335,8 @@ int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
 }
 
 static int setup_cp_camera(const int i,
-                           const int32_t width, const int32_t height)
+                           const int32_t width, const int32_t height,
+                           const _Bool setup_preview_port_for_null)
 {
     const unsigned camera_output_port_index = cameras_config[i].camera_output_port_index;
     MMAL_STATUS_T status;
@@ -367,6 +370,33 @@ static int setup_cp_camera(const int i,
         if (status != MMAL_SUCCESS) {
             print_error("Enabling control port of camera %d failed: 0x%08x",
                         i, status);
+            ret = 1;
+            goto end;
+        }
+    }
+    if (setup_preview_port_for_null) {
+        MMAL_PORT_T *output = mmal_util_get_port(cp_cameras[i],
+                                                 MMAL_PORT_TYPE_OUTPUT,
+                                                 CAMERA_PREVIEW_PORT);
+
+        if (output == NULL) {
+            print_error("Getting output %d of camera %d failed",
+                        CAMERA_PREVIEW_PORT, i);
+            ret = 1;
+            goto end;
+        }
+
+        status = config_port(output, MMAL_ENCODING_RGBA, width, height);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting format of camera %d failed: 0x%08x", i, status);
+            ret = 1;
+            goto end;
+        }
+
+        status = mmal_port_parameter_set_boolean(output,
+                                            MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
+        if (status != MMAL_SUCCESS) {
+            print_error("Setting zero-copy on camera %d failed: 0x%08x", i, status);
             ret = 1;
             goto end;
         }
@@ -761,8 +791,9 @@ static int connect_ports(const int i, const int len)
     int ret = 0;
 
     if (cfg->use_camera_capture_port) {
+        /* Connect camera preview port to null for AWB processing. */
         status = mmal_connection_create(&conn_camera_nulls[i],
-                                        cp_cameras[i]->output[cfg->camera_output_port_index],
+                                        cp_cameras[i]->output[CAMERA_PREVIEW_PORT],
                                         cp_nulls[i]->input[0],
                                         MMAL_CONNECTION_FLAG_TUNNELLING);
         if (status != MMAL_SUCCESS) {
@@ -872,7 +903,8 @@ int rpigrafx_finish_config()
             max_height = MMAL_MAX(max_height, isps_config[i][j].height);
         }
 
-        if ((ret = setup_cp_camera(i, max_width, max_height)))
+        if ((ret = setup_cp_camera(i, max_width, max_height,
+                                   cfg->use_camera_capture_port)))
             goto end;
         if ((ret = setup_cp_splitter(i, len, max_width, max_height)))
             goto end;
