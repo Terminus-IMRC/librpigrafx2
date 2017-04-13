@@ -446,7 +446,7 @@ static int setup_cp_null(const int i,
     MMAL_STATUS_T status;
     int ret = 0;
 
-    status = mmal_component_create("vc.ril.null_sink", &cp_nulls[i]);
+    status = mmal_component_create("vc.null_sink", &cp_nulls[i]);
     if (status != MMAL_SUCCESS) {
         print_error("Creating null component of camera %d failed: 0x%08x",
                     i, status);
