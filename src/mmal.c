@@ -386,7 +386,7 @@ static int setup_cp_camera(const int i,
             goto end;
         }
 
-        status = config_port(output, MMAL_ENCODING_RGBA, width, height);
+        status = config_port(output, MMAL_ENCODING_OPAQUE, width, height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of camera %d failed: 0x%08x", i, status);
             ret = 1;
@@ -481,7 +481,7 @@ static int setup_cp_null(const int i,
             goto end;
         }
 
-        status = config_port(input, MMAL_ENCODING_RGBA, width, height);
+        status = config_port(input, MMAL_ENCODING_OPAQUE, width, height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of null %d failed: 0x%08x", i, status);
             ret = 1;
