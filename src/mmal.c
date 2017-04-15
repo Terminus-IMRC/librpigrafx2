@@ -942,10 +942,6 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
     MMAL_BUFFER_HEADER_T *header = NULL;
     MMAL_CONNECTION_T *conn = conn_isps_renders[fcp->camera_number][fcp->splitter_output_port_index];
 
-    while ((header = mmal_queue_get(conn->pool->queue)) != NULL) {
-        mmal_port_send_buffer(conn->out, header);
-    }
-
     if (cfg->use_camera_capture_port) {
         MMAL_STATUS_T status;
 
@@ -961,7 +957,23 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
         }
     }
 
-    ctx->header = mmal_queue_wait(conn->queue);
+retry:
+
+    while ((header = mmal_queue_get(conn->pool->queue)) != NULL) {
+        mmal_port_send_buffer(conn->out, header);
+    }
+
+    header = mmal_queue_wait(conn->queue);
+    /*
+     * camera[2] returns empty queue once every two headers.
+     * Retry until we get the full header.
+     */
+    if (header->length == 0) {
+        mmal_buffer_header_release(header);
+        goto retry;
+    }
+
+    ctx->header = header;
 
 end:
     return ret;
