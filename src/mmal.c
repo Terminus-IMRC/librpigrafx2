@@ -855,6 +855,15 @@ static int connect_ports(const int i, const int len)
             goto end;
         }
     }
+    if (cfg->use_camera_capture_port) {
+        status = mmal_connection_enable(conn_camera_nulls[i]);
+        if (status != MMAL_SUCCESS) {
+            print_error("Enabling connection between " \
+                        "camera and null %d,%d failed: 0x%08x", i, j, status);
+            ret = 1;
+            goto end;
+        }
+    }
     status = mmal_connection_enable(conn_camera_splitters[i]);
     if (status != MMAL_SUCCESS) {
         print_error("Enabling connection between " \
