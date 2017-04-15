@@ -265,6 +265,7 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
     }
     ctx->status = MMAL_SUCCESS;
     ctx->header = NULL;
+    ctx->is_header_passed_to_render = 0;
     /* Note: It seems that the name can be duplicated. It can even be NULL. */
     status_vcos = vcos_semaphore_create(&ctx->sem, "conn callback sem", 0);
     if (status_vcos != VCOS_SUCCESS) {
@@ -957,6 +958,11 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
         }
     }
 
+    if (ctx->header != NULL && !ctx->is_header_passed_to_render)
+        mmal_buffer_header_release(ctx->header);
+    ctx->header = NULL;
+    ctx->is_header_passed_to_render = 0;
+
 retry:
 
     while ((header = mmal_queue_get(conn->pool->queue)) != NULL) {
@@ -1022,6 +1028,8 @@ int rpigrafx_render_frame(rpigrafx_frame_config_t *fcp)
         print_error("Sending header to render failed: 0x%08x", status);
         goto end;
     }
+
+    ctx->is_header_passed_to_render = !0;
 
 end:
     return ret;
