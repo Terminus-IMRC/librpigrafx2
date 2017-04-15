@@ -9,6 +9,8 @@ config.status
 /m4/lt*.m4
 /m4/libtool.m4
 
+/test/test_dispmanx
+
 
 # Created by https://www.gitignore.io/api/c,vim,git,macos,linux,emacs,windows,autotools
 

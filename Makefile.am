@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = include src
+SUBDIRS = include src test
 
 pkgconfigdir = @pkgconfigdir@
 pkgconfig_DATA = librpigrafx.pc
