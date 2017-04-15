@@ -23,7 +23,7 @@ int main(int argc, char *argv[])
     }
     camera_num = atoi(argv[1]);
 
-    _check(rpigrafx_config_camera_frame(camera_num, 512, 512, MMAL_ENCODING_OPAQUE, 1, &fc));
+    _check(rpigrafx_config_camera_frame(camera_num, 512, 512, MMAL_ENCODING_RGB24, 1, &fc));
     _check(rpigrafx_config_camera_frame_render(1, 0, 0, 0, 0, 5, &fc));
     _check(rpigrafx_finish_config());
     _check(rpigrafx_capture_next_frame(&fc));
