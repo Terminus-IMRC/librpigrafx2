@@ -11,8 +11,9 @@
 #include "local.h"
 
 struct priv_rpigrafx_called priv_rpigrafx_called = {
-    .main = 0,
-    .mmal = 0
+    .main     = 0,
+    .mmal     = 0,
+    .dispmanx = 0
 };
 
 int rpigrafx_init()
@@ -23,6 +24,11 @@ int rpigrafx_init()
         goto end;
 
     ret = priv_rpigrafx_mmal_init();
+    if (ret) {
+        print_error("Initializing mmal failed: 0x%08x", ret);
+        goto end;
+    }
+    ret = priv_rpigrafx_dispmanx_init();
     if (ret) {
         print_error("Initializing mmal failed: 0x%08x", ret);
         goto end;
@@ -40,6 +46,11 @@ int rpigrafx_finalize()
     if (priv_rpigrafx_called.main != 1)
         goto end;
 
+    ret = priv_rpigrafx_dispmanx_finalize();
+    if (ret) {
+        print_error("Finalizing mmal failed: 0x%08x", ret);
+        goto end;
+    }
     ret = priv_rpigrafx_mmal_finalize();
     if (ret) {
         print_error("Finalizing mmal failed: 0x%08x", ret);

@@ -11,7 +11,7 @@
 #define LOCAL_H
 
     struct priv_rpigrafx_called {
-        int main, mmal;
+        int main, mmal, dispmanx;
     } priv_rpigrafx_called;
 
 #define print_error(fmt, ...) print_error_core(__FILE__, __LINE__, __func__, \
@@ -22,5 +22,9 @@
     /* mmal.c */
     int priv_rpigrafx_mmal_init();
     int priv_rpigrafx_mmal_finalize();
+
+    /* dispmanx.c */
+    int priv_rpigrafx_dispmanx_init();
+    int priv_rpigrafx_dispmanx_finalize();
 
 #endif /* LOCAL_H */

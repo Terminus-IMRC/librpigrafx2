@@ -57,4 +57,6 @@
 
     int rpigrafx_render_frame(rpigrafx_frame_config_t *fcp);
 
+    int rpigrafx_get_screen_size(int *widthp, int *heightp);
+
 #endif /* RPIGRAFX2_H */
