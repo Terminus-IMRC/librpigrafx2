@@ -17,7 +17,6 @@
     struct callback_context {
         MMAL_STATUS_T status;
         MMAL_BUFFER_HEADER_T *header;
-        VCOS_SEMAPHORE_T sem;
         _Bool is_header_passed_to_render;
     };
 

@@ -201,7 +201,7 @@ static void callback_control(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 static void callback_conn(MMAL_CONNECTION_T *conn)
 {
     struct callback_context *ctx = (struct callback_context*) conn->user_data;
-    vcos_semaphore_post(&ctx->sem);
+    (void) ctx;
 }
 
 int rpigrafx_config_camera_frame(const int32_t camera_number,
@@ -213,7 +213,6 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
     int32_t max_width, max_height;
     int idx;
     struct callback_context *ctx = NULL;
-    VCOS_STATUS_T status_vcos;
     int ret = 0;
 
     if (camera_number >= num_cameras) {
@@ -266,13 +265,6 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
     ctx->status = MMAL_SUCCESS;
     ctx->header = NULL;
     ctx->is_header_passed_to_render = 0;
-    /* Note: It seems that the name can be duplicated. It can even be NULL. */
-    status_vcos = vcos_semaphore_create(&ctx->sem, "conn callback sem", 0);
-    if (status_vcos != VCOS_SUCCESS) {
-        print_error("Failed to create semaphore: 0x%08x", status_vcos);
-        ret = 1;
-        goto end;
-    }
     ctxs[camera_number][idx] = ctx;
 
     fcp->camera_number = camera_number;
