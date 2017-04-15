@@ -406,7 +406,7 @@ static int setup_cp_camera(const int i,
             goto end;
         }
 
-        status = config_port(output, MMAL_ENCODING_RGBA, width, height);
+        status = config_port(output, MMAL_ENCODING_RGB24, width, height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of camera %d failed: 0x%08x", i, status);
             ret = 1;
@@ -544,7 +544,7 @@ static int setup_cp_splitter(const int i, const int len,
             goto end;
         }
 
-        status = config_port(input, MMAL_ENCODING_OPAQUE, width, height);
+        status = config_port(input, MMAL_ENCODING_RGB24, width, height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "splitter %d input failed: 0x%08x", i, status);
@@ -571,7 +571,7 @@ static int setup_cp_splitter(const int i, const int len,
             goto end;
         }
 
-        status = config_port(output, MMAL_ENCODING_RGBA, width, height);
+        status = config_port(output, MMAL_ENCODING_RGB24, width, height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "splitter %d output %d failed: 0x%08x", i, j, status);
@@ -640,7 +640,7 @@ static int setup_cp_isp(const int i, const int j,
             goto end;
         }
 
-        status = config_port(input, MMAL_ENCODING_RGBA, width, height);
+        status = config_port(input, MMAL_ENCODING_RGB24, width, height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "isp %d input %d failed: 0x%08x", i, j, status);
