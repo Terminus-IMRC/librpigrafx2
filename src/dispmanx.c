@@ -25,14 +25,14 @@ int priv_rpigrafx_dispmanx_init()
     bcm_host_init();
 
     display = vc_dispmanx_display_open(0);
-    if (!display) {
+    if (display == DISPMANX_NO_HANDLE) {
         print_error("Failed to open dispmanx display: 0x%08x", display);
         ret = 1;
         goto end;
     }
 
     status = vc_dispmanx_display_get_info(display, &info);
-    if (status) {
+    if (status != DISPMANX_SUCCESS) {
         print_error("Failed to get display info: 0x%08x", status);
         ret = 1;
         goto end;
@@ -52,12 +52,12 @@ int priv_rpigrafx_dispmanx_finalize()
         goto end;
 
     status = vc_dispmanx_display_close(display);
-    if (status) {
+    if (status != DISPMANX_SUCCESS) {
         print_error("Failed to close dispmanx display: 0x%08x", status);
         ret = 1;
         goto end;
     }
-    display = 0;
+    display = DISPMANX_NO_HANDLE;
 
     bcm_host_deinit();
 
