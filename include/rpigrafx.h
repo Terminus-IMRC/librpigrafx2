@@ -28,6 +28,11 @@
         struct callback_context *ctx;
     } rpigrafx_frame_config_t;
 
+    typedef enum {
+        RPIGRAFX_CAMERA_PORT_PREVIEW,
+        RPIGRAFX_CAMERA_PORT_CAPTURE
+    } rpigrafx_camera_port_t;
+
     int rpigrafx_init()     __attribute__((constructor));
     int rpigrafx_finalize() __attribute__((destructor));
 
@@ -36,6 +41,8 @@
                                      const MMAL_FOURCC_T encoding,
                                      const _Bool is_zero_copy_rendering,
                                      rpigrafx_frame_config_t *fcp);
+    int rpigrafx_config_camera_port(const int32_t camera_number,
+                                    const rpigrafx_camera_port_t camera_port);
     int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
                                             const int32_t x, const int32_t y,
                                             const int32_t width, const int32_t height,
