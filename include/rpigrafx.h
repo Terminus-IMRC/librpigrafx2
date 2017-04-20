@@ -49,6 +49,8 @@
                                             rpigrafx_frame_config_t *fcp);
     int rpigrafx_finish_config();
 
+    void rpigrafx_set_verbose(const int verbose);
+
     int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp);
     void* rpigrafx_get_frame(rpigrafx_frame_config_t *fcp);
     /*void* rpigrafx_get_output_buffer(rpigrafx_frame_config_t *fcp);*/
