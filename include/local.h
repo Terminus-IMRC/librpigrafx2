@@ -14,6 +14,8 @@
         int main, mmal, dispmanx;
     } priv_rpigrafx_called;
 
+    extern int priv_rpigrafx_verbose;
+
 #define print_error(fmt, ...) print_error_core(__FILE__, __LINE__, __func__, \
                                                fmt, ##__VA_ARGS__)
     void print_error_core(const char *file, const int line, const char *func,

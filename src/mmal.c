@@ -73,6 +73,18 @@ static MMAL_CONNECTION_T *conn_isps_renders[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
 static struct callback_context *ctxs[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
+#define WARN_HEADER(pre, header, post) \
+    do { \
+        if (header != NULL) { \
+            print_error("%s%p %p %d 0x%08x%s", \
+                        pre, \
+                        header, header->data, header->length, header->flags, \
+                        post); \
+       } else { \
+            print_error("%s%p%s", pre, header, post); \
+       } \
+    } while (0)
+
 static MMAL_STATUS_T config_port(MMAL_PORT_T *port, const MMAL_FOURCC_T encoding,
                                  const int width, const int height)
 {
@@ -950,18 +962,26 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
         }
     }
 
-    if (ctx->header != NULL && !ctx->is_header_passed_to_render)
+    if (ctx->header != NULL && !ctx->is_header_passed_to_render) {
+        if (priv_rpigrafx_verbose)
+            WARN_HEADER("Releasing header ", ctx->header, "");
         mmal_buffer_header_release(ctx->header);
+    }
     ctx->header = NULL;
     ctx->is_header_passed_to_render = 0;
 
 retry:
 
     while ((header = mmal_queue_get(conn->pool->queue)) != NULL) {
+        if (priv_rpigrafx_verbose)
+            WARN_HEADER("Got header ", header, " from conn->pool->queue; " \
+                                               "Sending to conn->out");
         mmal_port_send_buffer(conn->out, header);
     }
 
     header = mmal_queue_wait(conn->queue);
+    if (priv_rpigrafx_verbose)
+        WARN_HEADER("Got header ", header, " from conn->queue");
     /*
      * camera[2] returns empty queue once every two headers.
      * Retry until we get the full header.
