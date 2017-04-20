@@ -16,6 +16,8 @@ struct priv_rpigrafx_called priv_rpigrafx_called = {
     .dispmanx = 0
 };
 
+int priv_rpigrafx_verbose = 0;
+
 int rpigrafx_init()
 {
     int ret = 0;
@@ -57,7 +59,14 @@ int rpigrafx_finalize()
         goto end;
     }
 
+    priv_rpigrafx_verbose = 0;
+
 end:
     priv_rpigrafx_called.main --;
     return ret;
+}
+
+void rpigrafx_set_verbose(const int verbose)
+{
+    priv_rpigrafx_verbose = verbose;
 }
