@@ -10,8 +10,7 @@ config.status
 /m4/libtool.m4
 
 /test/test_dispmanx
-/test/test_capture_and_render_once
-/test/test_preview_render_seq
+/test/test_capture_render_seq
 
 
 # Created by https://www.gitignore.io/api/c,vim,git,macos,linux,emacs,windows,autotools
