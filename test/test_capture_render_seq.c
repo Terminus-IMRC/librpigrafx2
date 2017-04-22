@@ -49,6 +49,7 @@ static void usage()
             "\n"
             " Misc options:\n"
             "\n"
+            "  -s TIME            Interval between capture and render, in ms (default: 0)\n"
             "  -q                 Turn off/on QPU before/after each capture\n"
             "  -v [VERBOSE]       Be verbose or not (default: 1)\n"
             "  -?                 What you are doing\n"
@@ -61,6 +62,7 @@ int main(int argc, char *argv[])
     int i, camera_num = 0, nframes = 20, width, height;
     int render_fullscreen = 1, render_layer = 5;
     int render_x = 0, render_y = 0, render_width, render_height;
+    uint32_t interval = 0;
     int mb = -1;
     _Bool on_off_qpu = 0;
     int verbose = 1;
@@ -75,7 +77,7 @@ int main(int argc, char *argv[])
     render_width  = width;
     render_height = height;
 
-    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:qv::?")) != -1) {
+    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:s:qv::?")) != -1) {
         switch (opt) {
             case 'c':
                 camera_num = atoi(optarg);
@@ -112,6 +114,9 @@ int main(int argc, char *argv[])
                 break;
             case 'l':
                 render_layer = atoi(optarg);
+                break;
+            case 's':
+                interval = atoi(optarg);
                 break;
             case 'q':
                 on_off_qpu = 1;
@@ -154,6 +159,7 @@ int main(int argc, char *argv[])
         _check(rpigrafx_capture_next_frame(&fc));
         if (on_off_qpu)
             mailbox_qpu_enable(mb, 1);
+        vcos_sleep(interval);
         _check(rpigrafx_render_frame(&fc));
     }
     time = get_time() - start;
