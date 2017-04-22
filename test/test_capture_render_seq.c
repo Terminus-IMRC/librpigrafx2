@@ -201,12 +201,12 @@ int main(int argc, char *argv[])
         if (on_off_qpu)
             mailbox_qpu_enable(mb, 0);
         _check(rpigrafx_capture_next_frame(&fc));
+        if (on_off_qpu)
+            mailbox_qpu_enable(mb, 1);
         if (get_frame || save_frame) {
             p = rpigrafx_get_frame(&fc);
             fprintf(stderr, "Got frame %p\n", p);
         }
-        if (on_off_qpu)
-            mailbox_qpu_enable(mb, 1);
         vcos_sleep(interval);
         if (save_frame)
             save_image(i, p, width, height);
