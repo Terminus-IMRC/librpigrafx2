@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
     int i, camera_num = 0, nframes = 20, width, height;
     int render_fullscreen = 1, render_layer = 5;
     int render_x = 0, render_y = 0, render_width, render_height;
-    int mb = 0;
+    int mb = -1;
     _Bool on_off_qpu = 0;
     int verbose = 1;
     rpigrafx_camera_port_t camera_port = RPIGRAFX_CAMERA_PORT_PREVIEW;
@@ -132,9 +132,8 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
-    if (on_off_qpu)
-        mb = mailbox_open();
-    else
+    mb = mailbox_open();
+    if (!on_off_qpu)
         mailbox_qpu_enable(mb, 0);
 
     rpigrafx_set_verbose(verbose);
@@ -160,9 +159,8 @@ int main(int argc, char *argv[])
     time = get_time() - start;
     fprintf(stderr, "%f [s], %f [frame/s]\n", time, nframes / time);
 
-    if (on_off_qpu)
-        mailbox_close(mb);
-    else
+    if (!on_off_qpu)
         mailbox_qpu_enable(mb, 1);
+    mailbox_close(mb);
     return 0;
 }
