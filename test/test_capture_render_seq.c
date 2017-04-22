@@ -22,6 +22,37 @@ static double get_time()
     return (double) t.tv_sec + t.tv_usec * 1e-6;
 }
 
+/* This function is copyrighted by Nakamura Koichi (koichi@idein.jp). */
+static void save_image(const int i, const uint8_t *p,
+                       const int width, const int height)
+{
+    int x, y;
+    FILE *fp = NULL;
+    char fname[0x100];
+    int reti;
+
+    snprintf(fname, sizeof(fname), "%08d.ppm", i);
+    fp = fopen(fname, "w+");
+    if (fp == NULL) {
+        fprintf(stderr, "error: Failed to open %s\n", fname);
+        exit(EXIT_FAILURE);
+    }
+    fprintf(fp, "P3\n%d %d\n255\n", width, height);
+    for (y = 0; y < height; y ++)
+        for (x = 0; x < width; x ++)
+            fprintf(fp, "%u %u %u\n",
+                    p[y * width + x * 3 + 0],
+                    p[y * width + x * 3 + 1],
+                    p[y * width + x * 3 + 2]
+                   );
+    reti = fclose(fp);
+    if (reti != 0) {
+        fprintf(stderr, "error: Failed to close %s: %s\n", fname,
+                strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+}
+
 static void usage()
 {
     fprintf(stderr, "Usage: %s [OPTION]...\n", progname);
@@ -52,6 +83,7 @@ static void usage()
             "  -g                 Get frame pointer after capture\n"
             "  -s TIME            Interval between capture and render, in ms (default: 0)\n"
             "  -q                 Turn off/on QPU before/after each capture\n"
+            "  -S                 Save frame to \"%%08d.ppm\"\n"
             "  -v [VERBOSE]       Be verbose or not (default: 1)\n"
             "  -?                 What you are doing\n"
            );
@@ -65,7 +97,7 @@ int main(int argc, char *argv[])
     int render_x = 0, render_y = 0, render_width, render_height;
     uint32_t interval = 0;
     int mb = -1;
-    _Bool get_frame = 0, on_off_qpu = 0;
+    _Bool get_frame = 0, on_off_qpu = 0, save_frame = 0;
     int verbose = 1;
     rpigrafx_camera_port_t camera_port = RPIGRAFX_CAMERA_PORT_PREVIEW;
     rpigrafx_frame_config_t fc;
@@ -78,7 +110,7 @@ int main(int argc, char *argv[])
     render_width  = width;
     render_height = height;
 
-    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:gs:qv::?")) != -1) {
+    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:gs:qSv::?")) != -1) {
         switch (opt) {
             case 'c':
                 camera_num = atoi(optarg);
@@ -125,6 +157,9 @@ int main(int argc, char *argv[])
             case 'q':
                 on_off_qpu = 1;
                 break;
+            case 'S':
+                save_frame = 1;
+                break;
             case 'v':
                 verbose = (optarg == 0) ? 1 : !!atoi(optarg);
                 break;
@@ -157,17 +192,20 @@ int main(int argc, char *argv[])
 
     start = get_time();
     for (i = 0; i < nframes; i ++) {
+        void *p = NULL;
         fprintf(stderr, "Frame #%d\n", i);
         if (on_off_qpu)
             mailbox_qpu_enable(mb, 0);
         _check(rpigrafx_capture_next_frame(&fc));
-        if (get_frame) {
-            uint8_t *p = rpigrafx_get_frame(&fc);
+        if (get_frame || save_frame) {
+            p = rpigrafx_get_frame(&fc);
             fprintf(stderr, "Got frame %p\n", p);
         }
         if (on_off_qpu)
             mailbox_qpu_enable(mb, 1);
         vcos_sleep(interval);
+        if (save_frame)
+            save_image(i, p, width, height);
         _check(rpigrafx_render_frame(&fc));
     }
     time = get_time() - start;
