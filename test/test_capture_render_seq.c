@@ -42,8 +42,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
     camera_num = atoi(argv[1]);
-    n = atoi(argv[2]);
-    switch (argv[3][0]) {
+    switch (argv[2][0]) {
         case 'p':
         case 'P':
             port = RPIGRAFX_CAMERA_PORT_PREVIEW;
@@ -53,11 +52,12 @@ int main(int argc, char *argv[])
             port = RPIGRAFX_CAMERA_PORT_CAPTURE;
             break;
         default:
-            fprintf(stderr, "Invalid CAMERA_PORT parameter: %s\n", argv[3]);
+            fprintf(stderr, "Invalid CAMERA_PORT parameter: %s\n", argv[2]);
             usage();
             exit(EXIT_FAILURE);
             break;
     }
+    n = atoi(argv[3]);
     if (argc >= 1 + 4)
         width  = atoi(argv[4]);
     if (argc >= 1 + 5)
