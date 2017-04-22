@@ -1,4 +1,5 @@
 #include <rpigrafx.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
@@ -28,55 +29,94 @@ static void usage()
 
 int main(int argc, char *argv[])
 {
-    int i, n, camera_num;
-    int width = 1024, height = 768;
-    rpigrafx_camera_port_t port = RPIGRAFX_CAMERA_PORT_PREVIEW;
+    int opt;
+    int i, camera_num = 0, nframes = 20, width, height;
+    int render_fullscreen = 1, render_layer = 5;
+    int render_x = 0, render_y = 0, render_width, render_height;
+    int verbose = 1;
+    rpigrafx_camera_port_t camera_port = RPIGRAFX_CAMERA_PORT_PREVIEW;
     rpigrafx_frame_config_t fc;
     double start, time;
 
     progname = argv[0];
 
-    if (argc < 1 + 3) {
-        fprintf(stderr, "Invalid the number of the arguments.\n");
-        usage();
+    rpigrafx_set_verbose(verbose);
+    _check(rpigrafx_get_screen_size(&width, &height));
+    render_width  = width;
+    render_height = height;
+
+    while ((opt = getopt(argc, argv, "c:P:C:n:w:h:f::x:y:W:H:l:v::")) != -1) {
+        switch (opt) {
+            case 'c':
+                camera_num = atoi(optarg);
+                break;
+            case 'P':
+                camera_port = RPIGRAFX_CAMERA_PORT_PREVIEW;
+                break;
+            case 'C':
+                camera_port = RPIGRAFX_CAMERA_PORT_CAPTURE;
+                break;
+            case 'n':
+                nframes = atoi(optarg);
+                break;
+            case 'w':
+                width  = atoi(optarg);
+                break;
+            case 'h':
+                height = atoi(optarg);
+                break;
+            case 'f':
+                render_fullscreen = (optarg == 0) ? 1 : !!atoi(optarg);
+                break;
+            case 'x':
+                render_x = atoi(optarg);
+                break;
+            case 'y':
+                render_y = atoi(optarg);
+                break;
+            case 'W':
+                render_width  = atoi(optarg);
+                break;
+            case 'H':
+                render_height = atoi(optarg);
+                break;
+            case 'l':
+                render_layer = atoi(optarg);
+                break;
+            case 'v':
+                verbose = (optarg == 0) ? 1 : !!atoi(optarg);
+                break;
+            default:
+                if (opt != '?')
+                    fprintf(stderr, "error: Unknown option: %c\n", opt);
+                usage();
+                exit(EXIT_FAILURE);
+        }
+    }
+
+    if (optind != argc) {
+        fprintf(stderr, "error: Extra argument(s) after options.\n");
         exit(EXIT_FAILURE);
     }
-    camera_num = atoi(argv[1]);
-    switch (argv[2][0]) {
-        case 'p':
-        case 'P':
-            port = RPIGRAFX_CAMERA_PORT_PREVIEW;
-            break;
-        case 'c':
-        case 'C':
-            port = RPIGRAFX_CAMERA_PORT_CAPTURE;
-            break;
-        default:
-            fprintf(stderr, "Invalid CAMERA_PORT parameter: %s\n", argv[2]);
-            usage();
-            exit(EXIT_FAILURE);
-            break;
-    }
-    n = atoi(argv[3]);
-    if (argc >= 1 + 4)
-        width  = atoi(argv[4]);
-    if (argc >= 1 + 5)
-        height = atoi(argv[5]);
 
-    rpigrafx_set_verbose(1);
-    _check(rpigrafx_config_camera_frame(camera_num, width, height, MMAL_ENCODING_RGB24, 1, &fc));
-    _check(rpigrafx_config_camera_port(camera_num, port));
-    _check(rpigrafx_config_camera_frame_render(1, 0, 0, 0, 0, 5, &fc));
+    rpigrafx_set_verbose(verbose);
+    _check(rpigrafx_config_camera_frame(camera_num, width, height,
+                                        MMAL_ENCODING_RGB24, 1, &fc));
+    _check(rpigrafx_config_camera_port(camera_num, camera_port));
+    _check(rpigrafx_config_camera_frame_render(render_fullscreen,
+                                               render_x, render_y,
+                                               render_width, render_height,
+                                               render_layer, &fc));
     _check(rpigrafx_finish_config());
 
     start = get_time();
-    for (i = 0; i < n; i ++) {
+    for (i = 0; i < nframes; i ++) {
         fprintf(stderr, "Frame #%d\n", i);
         _check(rpigrafx_capture_next_frame(&fc));
         _check(rpigrafx_render_frame(&fc));
     }
     time = get_time() - start;
-    fprintf(stderr, "%f [s], %f [frame/s]\n", time, n / time);
+    fprintf(stderr, "%f [s], %f [frame/s]\n", time, nframes / time);
 
     return 0;
 }
