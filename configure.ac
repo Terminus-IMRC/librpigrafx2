@@ -28,6 +28,10 @@ AC_SUBST([BCM_HOST_LIBS])
 PKG_CHECK_MODULES([MMAL], [mmal])
 AC_SUBST([MMAL_CFLAGS])
 AC_SUBST([MMAL_LIBS])
+AC_CHECK_LIB([qmkl], [mailbox_qpu_enable],
+	     [QMKL_LIBS=-lqmkl
+	      AC_SUBST(QMKL_LIBS)]
+	    )
 
 # Checks for header files.
 AC_CHECK_HEADERS([stdio.h stdint.h stdlib.h])
