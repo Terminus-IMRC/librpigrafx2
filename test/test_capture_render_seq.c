@@ -69,7 +69,7 @@ int main(int argc, char *argv[])
     render_width  = width;
     render_height = height;
 
-    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:v::")) != -1) {
+    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:v::?")) != -1) {
         switch (opt) {
             case 'c':
                 camera_num = atoi(optarg);
