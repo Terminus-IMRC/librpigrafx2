@@ -39,5 +39,5 @@ AC_TYPE_UINT32_T
 AC_FUNC_REALLOC
 
 LT_INIT
-AC_CONFIG_FILES([Makefile include/Makefile src/Makefile librpigrafx.pc])
+AC_CONFIG_FILES([Makefile include/Makefile src/Makefile test/Makefile librpigrafx.pc])
 AC_OUTPUT
