@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <qmkl.h>
 
 #define _check(x) \
     do { \
@@ -48,6 +49,7 @@ static void usage()
             "\n"
             " Misc options:\n"
             "\n"
+            "  -q                 Turn off/on QPU before/after each capture\n"
             "  -v [VERBOSE]       Be verbose or not (default: 1)\n"
             "  -?                 What you are doing\n"
            );
@@ -59,6 +61,8 @@ int main(int argc, char *argv[])
     int i, camera_num = 0, nframes = 20, width, height;
     int render_fullscreen = 1, render_layer = 5;
     int render_x = 0, render_y = 0, render_width, render_height;
+    int mb = 0;
+    _Bool on_off_qpu = 0;
     int verbose = 1;
     rpigrafx_camera_port_t camera_port = RPIGRAFX_CAMERA_PORT_PREVIEW;
     rpigrafx_frame_config_t fc;
@@ -71,7 +75,7 @@ int main(int argc, char *argv[])
     render_width  = width;
     render_height = height;
 
-    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:v::?")) != -1) {
+    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:qv::?")) != -1) {
         switch (opt) {
             case 'c':
                 camera_num = atoi(optarg);
@@ -109,6 +113,9 @@ int main(int argc, char *argv[])
             case 'l':
                 render_layer = atoi(optarg);
                 break;
+            case 'q':
+                on_off_qpu = 1;
+                break;
             case 'v':
                 verbose = (optarg == 0) ? 1 : !!atoi(optarg);
                 break;
@@ -125,6 +132,9 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
 
+    if (on_off_qpu)
+        mb = mailbox_open();
+
     rpigrafx_set_verbose(verbose);
     _check(rpigrafx_config_camera_frame(camera_num, width, height,
                                         MMAL_ENCODING_RGB24, 1, &fc));
@@ -138,11 +148,17 @@ int main(int argc, char *argv[])
     start = get_time();
     for (i = 0; i < nframes; i ++) {
         fprintf(stderr, "Frame #%d\n", i);
+        if (on_off_qpu)
+            mailbox_qpu_enable(mb, 0);
         _check(rpigrafx_capture_next_frame(&fc));
+        if (on_off_qpu)
+            mailbox_qpu_enable(mb, 1);
         _check(rpigrafx_render_frame(&fc));
     }
     time = get_time() - start;
     fprintf(stderr, "%f [s], %f [frame/s]\n", time, nframes / time);
 
+    if (on_off_qpu)
+        mailbox_close(mb);
     return 0;
 }
