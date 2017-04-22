@@ -22,16 +22,16 @@ AC_PROG_CC
 AM_PROG_AR
 
 # Checks for libraries.
-PKG_CHECK_MODULES([BCM_HOST], [bcm_host])
+PKG_CHECK_MODULES([BCM_HOST], [bcm_host], , [AC_MSG_ERROR("missing -lbcm_host")])
 AC_SUBST([BCM_HOST_CFLAGS])
 AC_SUBST([BCM_HOST_LIBS])
-PKG_CHECK_MODULES([MMAL], [mmal])
+PKG_CHECK_MODULES([MMAL], [mmal], , [AC_MSG_ERROR("missing -lmmal")])
 AC_SUBST([MMAL_CFLAGS])
 AC_SUBST([MMAL_LIBS])
 AC_CHECK_LIB([qmkl], [mailbox_qpu_enable],
-	     [QMKL_LIBS=-lqmkl
-	      AC_SUBST(QMKL_LIBS)]
-	    )
+             [QMKL_LIBS=-lqmkl
+              AC_SUBST(QMKL_LIBS)],
+             [AC_MSG_ERROR("missing -lqmkl")])
 
 # Checks for header files.
 AC_CHECK_HEADERS([stdio.h stdint.h stdlib.h])
