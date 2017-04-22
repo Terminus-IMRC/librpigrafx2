@@ -206,14 +206,16 @@ skip:
 
 static void callback_control(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 {
-    MMAL_PARAM_UNUSED(port);
+    if (priv_rpigrafx_verbose)
+        print_error("Called by a port %s", port->name);
     mmal_buffer_header_release(header);
 }
 
 static void callback_conn(MMAL_CONNECTION_T *conn)
 {
-    struct callback_context *ctx = (struct callback_context*) conn->user_data;
-    (void) ctx;
+    if (priv_rpigrafx_verbose)
+        print_error("Called by a connection %s between %s and %s",
+                    conn->name, conn->out->name, conn->in->name);
 }
 
 int rpigrafx_config_camera_frame(const int32_t camera_number,
@@ -843,7 +845,6 @@ static int connect_ports(const int i, const int len)
     }
 
     for (j = 0; j < len; j ++) {
-        conn_isps_renders[i][j]->user_data = (void*) ctxs[i][j];
         conn_isps_renders[i][j]->callback = callback_conn;
         status = mmal_connection_enable(conn_isps_renders[i][j]);
         if (status != MMAL_SUCCESS) {
@@ -852,6 +853,7 @@ static int connect_ports(const int i, const int len)
             ret = 1;
             goto end;
         }
+        conn_splitters_isps[i][j]->callback = callback_conn;
         status = mmal_connection_enable(conn_splitters_isps[i][j]);
         if (status != MMAL_SUCCESS) {
             print_error("Enabling connection between " \
@@ -861,6 +863,7 @@ static int connect_ports(const int i, const int len)
         }
     }
     if (cfg->use_camera_capture_port) {
+        conn_camera_nulls[i]->callback = callback_conn;
         status = mmal_connection_enable(conn_camera_nulls[i]);
         if (status != MMAL_SUCCESS) {
             print_error("Enabling connection between " \
@@ -869,6 +872,7 @@ static int connect_ports(const int i, const int len)
             goto end;
         }
     }
+    conn_camera_splitters[i]->callback = callback_conn;
     status = mmal_connection_enable(conn_camera_splitters[i]);
     if (status != MMAL_SUCCESS) {
         print_error("Enabling connection between " \
