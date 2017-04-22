@@ -134,6 +134,8 @@ int main(int argc, char *argv[])
 
     if (on_off_qpu)
         mb = mailbox_open();
+    else
+        mailbox_qpu_enable(mb, 0);
 
     rpigrafx_set_verbose(verbose);
     _check(rpigrafx_config_camera_frame(camera_num, width, height,
@@ -160,5 +162,7 @@ int main(int argc, char *argv[])
 
     if (on_off_qpu)
         mailbox_close(mb);
+    else
+        mailbox_qpu_enable(mb, 1);
     return 0;
 }
