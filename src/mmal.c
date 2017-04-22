@@ -214,7 +214,7 @@ static void callback_control(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
 static void callback_conn(MMAL_CONNECTION_T *conn)
 {
     if (priv_rpigrafx_verbose)
-        print_error("Called by a connection %s from %s to %s",
+        print_error("Called by a connection %s between %s and %s",
                     conn->name, conn->out->name, conn->in->name);
 }
 
