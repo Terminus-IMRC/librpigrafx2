@@ -41,9 +41,9 @@ static void save_image(const int i, const uint8_t *p,
     for (y = 0; y < height; y ++)
         for (x = 0; x < width; x ++)
             fprintf(fp, "%u %u %u\n",
-                    p[y * width + x * 3 + 0],
-                    p[y * width + x * 3 + 1],
-                    p[y * width + x * 3 + 2]
+                    p[y * width * 3 + x * 3 + 0],
+                    p[y * width * 3 + x * 3 + 1],
+                    p[y * width * 3 + x * 3 + 2]
                    );
     reti = fclose(fp);
     if (reti != 0) {
