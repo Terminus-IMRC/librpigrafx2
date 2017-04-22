@@ -23,8 +23,32 @@ static double get_time()
 
 static void usage()
 {
-    fprintf(stderr, "Usage: %s CAMERA_NUM CAMERA_PORT NUM_FRAMES [WIDTH] [HEIGHT]\n", progname);
-    fprintf(stderr, "CAMERA_PORT: 'p' for preview and 'c' for capture\n");
+    fprintf(stderr, "Usage: %s [OPTION]...\n", progname);
+    fprintf(stderr,
+            "\n"
+            " Camera options:\n"
+            "\n"
+            "  -c CAMERA_NUM      Use camera CAMERA_NUM.\n"
+            "  -P                 Use preview port.\n"
+            "  -C                 Use capture port.\n"
+            "  -w WIDTH\n"
+            "  -h HEIGHT          Size of the capture frame.\n"
+            "  -n NFRAMES         Capture and render NFRAMES frames.\n"
+            "\n"
+            " Rendering options:\n"
+            "\n"
+            "  -f [FULLSCREEN]    Render frame in fullscreen or not.\n"
+            "  -x X\n"
+            "  -y Y               Coordinations of render frame.\n"
+            "  -W WIDTH\n"
+            "  -H HEIGHT          Size of render frame.\n"
+            "  -l LAYER           Layer of render frame.\n"
+            "\n"
+            " Misc options:\n"
+            "\n"
+            "  -v [VERBOSE]       Be verbose or not.\n"
+            "  -?                 What you are doing.\n"
+           );
 }
 
 int main(int argc, char *argv[])
@@ -45,7 +69,7 @@ int main(int argc, char *argv[])
     render_width  = width;
     render_height = height;
 
-    while ((opt = getopt(argc, argv, "c:P:C:n:w:h:f::x:y:W:H:l:v::")) != -1) {
+    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:v::")) != -1) {
         switch (opt) {
             case 'c':
                 camera_num = atoi(optarg);
@@ -56,14 +80,14 @@ int main(int argc, char *argv[])
             case 'C':
                 camera_port = RPIGRAFX_CAMERA_PORT_CAPTURE;
                 break;
-            case 'n':
-                nframes = atoi(optarg);
-                break;
             case 'w':
                 width  = atoi(optarg);
                 break;
             case 'h':
                 height = atoi(optarg);
+                break;
+            case 'n':
+                nframes = atoi(optarg);
                 break;
             case 'f':
                 render_fullscreen = (optarg == 0) ? 1 : !!atoi(optarg);
