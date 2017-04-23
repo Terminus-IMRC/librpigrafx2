@@ -943,13 +943,16 @@ static int connect_ports(const int i, const int len)
     }
 
     for (j = 0; j < len; j ++) {
-        conn_isps_renders[i][j]->callback = callback_conn;
-        status = mmal_connection_enable(conn_isps_renders[i][j]);
-        if (status != MMAL_SUCCESS) {
-            print_error("Enabling connection between " \
-                        "splitter and isp %d,%d failed: 0x%08x", i, j, status);
-            ret = 1;
-            goto end;
+        if (ctxs[i][j]->is_zero_copy_rendering) {
+            conn_isps_renders[i][j]->callback = callback_conn;
+            status = mmal_connection_enable(conn_isps_renders[i][j]);
+            if (status != MMAL_SUCCESS) {
+                print_error("Enabling connection between " \
+                            "splitter and isp %d,%d failed: 0x%08x", i, j,
+                            status);
+                ret = 1;
+                goto end;
+            }
         }
         conn_splitters_isps[i][j]->callback = callback_conn;
         status = mmal_connection_enable(conn_splitters_isps[i][j]);
