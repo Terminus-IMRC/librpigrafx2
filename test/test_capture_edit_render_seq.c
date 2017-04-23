@@ -138,7 +138,7 @@ int main(int argc, char *argv[])
 
     rpigrafx_set_verbose(verbose);
     _check(rpigrafx_config_camera_frame(camera_num, width, height,
-                                        MMAL_ENCODING_RGB24, 1, &fc));
+                                        MMAL_ENCODING_RGB24, 0, &fc));
     _check(rpigrafx_config_camera_port(camera_num, camera_port));
     _check(rpigrafx_config_frame_render(width, height,
                                         MMAL_ENCODING_RGB24, region, &fc));
