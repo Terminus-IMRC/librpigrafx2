@@ -930,15 +930,17 @@ static int connect_ports(const int i, const int len)
             ret = 1;
             goto end;
         }
-        status = mmal_connection_create(&conn_isps_renders[i][j],
-                                        cp_isps[i][j]->output[0],
-                                        cp_renders[i][j]->input[0],
-                                        0);
-        if (status != MMAL_SUCCESS) {
-            print_error("Connecting " \
-                        "isp and render ports %d,%d failed: 0x%08x", i, j, status);
-            ret = 1;
-            goto end;
+        if (ctxs[i][j]->is_zero_copy_rendering) {
+            status = mmal_connection_create(&conn_isps_renders[i][j],
+                                            cp_isps[i][j]->output[0],
+                                            cp_renders[i][j]->input[0],
+                                            0);
+            if (status != MMAL_SUCCESS) {
+                print_error("Connecting " \
+                            "isp and render ports %d,%d failed: 0x%08x", i, j, status);
+                ret = 1;
+                goto end;
+            }
         }
     }
 
@@ -983,15 +985,17 @@ static int connect_ports(const int i, const int len)
     }
 
     for (j = 0; j < len; j ++) {
-        MMAL_BUFFER_HEADER_T *header = NULL;
-        MMAL_CONNECTION_T *conn = conn_isps_renders[i][j];
-        while ((header = mmal_queue_get(conn->pool->queue)) != NULL) {
-            status = mmal_port_send_buffer(conn->out, header);
-            if (status != MMAL_SUCCESS) {
-                print_error("Sending pool buffer to "
-                            "isp-render conn %d,%d failed: 0x%08x", status);
-                ret = 1;
-                goto end;
+        if (ctxs[i][j]->is_zero_copy_rendering) {
+            MMAL_BUFFER_HEADER_T *header = NULL;
+            MMAL_CONNECTION_T *conn = conn_isps_renders[i][j];
+            while ((header = mmal_queue_get(conn->pool->queue)) != NULL) {
+                status = mmal_port_send_buffer(conn->out, header);
+                if (status != MMAL_SUCCESS) {
+                    print_error("Sending pool buffer to "
+                                "isp-render conn %d,%d failed: 0x%08x", status);
+                    ret = 1;
+                    goto end;
+                }
             }
         }
     }
