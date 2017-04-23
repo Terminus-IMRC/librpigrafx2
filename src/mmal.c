@@ -1150,7 +1150,7 @@ void* rpigrafx_get_output_frame(rpigrafx_frame_config_t *fcp)
 
     *lastp = header;
 
-    return header;
+    return header->data;
 }
 
 void* rpigrafx_get_input_frame(rpigrafx_frame_config_t *fcp)
@@ -1163,7 +1163,7 @@ void* rpigrafx_get_input_frame(rpigrafx_frame_config_t *fcp)
 
     *lastp = fcp->ctx->header = header;
 
-    return header;
+    return header->data;
 }
 
 int rpigrafx_render_frame(rpigrafx_frame_config_t *fcp)
