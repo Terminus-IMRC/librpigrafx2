@@ -1180,7 +1180,7 @@ int rpigrafx_render_frame(rpigrafx_frame_config_t *fcp)
         goto end;
     }
 
-    status = mmal_port_send_buffer(conn_isps_renders[fcp->camera_number][fcp->splitter_output_port_index]->in, fcp->ctx->header);
+    status = mmal_port_send_buffer(cp_renders[fcp->camera_number][fcp->splitter_output_port_index]->input[0], fcp->ctx->header);
     if (status != MMAL_SUCCESS) {
         print_error("Sending header to render failed: 0x%08x", status);
         goto end;
