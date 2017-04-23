@@ -1154,7 +1154,7 @@ void* rpigrafx_get_input_frame(rpigrafx_frame_config_t *fcp)
     header->length = fcp->ctx->input_buffer_length;
     header->flags = MMAL_BUFFER_HEADER_FLAG_EOS;
 
-    *lastp = header;
+    *lastp = fcp->ctx->header = header;
 
     return header;
 }
