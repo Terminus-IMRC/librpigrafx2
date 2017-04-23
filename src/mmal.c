@@ -58,11 +58,12 @@ static MMAL_COMPONENT_T *cp_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 static struct isps_config {
     int32_t width, height;
     MMAL_FOURCC_T encoding;
-    _Bool is_zero_copy_rendering;
 } isps_config[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
 static MMAL_COMPONENT_T *cp_renders[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 static struct renders_config {
+    uint32_t buffer_width, buffer_height;
+    MMAL_FOURCC_T buffer_encoding;
     MMAL_DISPLAYREGION_T region;
 } renders_config[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
@@ -97,6 +98,38 @@ static MMAL_STATUS_T config_port(MMAL_PORT_T *port, const MMAL_FOURCC_T encoding
     port->format->es->video.crop.height = height;
     return mmal_port_format_commit(port);
 }
+
+static int create_port_pool(MMAL_POOL_T **poolp, unsigned *buffer_lengthp,
+                            MMAL_PORT_T *port,
+                            const MMAL_FOURCC_T buffer_encoding,
+                            const uint32_t buffer_width,
+                            const uint32_t buffer_height)
+{
+    unsigned stride = 0;
+    int ret = 0;
+
+    stride = mmal_encoding_width_to_stride(buffer_encoding,
+                                           buffer_width);
+    if (stride <= 0) {
+        print_error("Invalid stride from MMAL: %u", stride);
+        ret = 1;
+        goto end;
+    }
+
+    *buffer_lengthp = buffer_height * stride;
+    *poolp = mmal_port_pool_create(port,
+                                   port->buffer_num_recommended,
+                                   *buffer_lengthp);
+    if (*poolp == NULL) {
+        print_error("Allocating port pool failed");
+        ret = 1;
+        goto end;
+    }
+
+end:
+    return ret;
+}
+
 
 int priv_rpigrafx_mmal_init()
 {
@@ -268,7 +301,6 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
     isps_config[camera_number][idx].width  = width;
     isps_config[camera_number][idx].height = height;
     isps_config[camera_number][idx].encoding = encoding;
-    isps_config[camera_number][idx].is_zero_copy_rendering = is_zero_copy_rendering;
 
     ctx = malloc(sizeof(*ctx));
     if (ctx == NULL) {
@@ -278,12 +310,15 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
     }
     ctx->status = MMAL_SUCCESS;
     ctx->header = NULL;
+    ctx->output_pool = ctx->input_pool = NULL;
+    ctx->output_buffer_length = ctx->input_buffer_length = 0;
+    ctx->last_output_header = ctx->last_input_header = NULL;
     ctx->is_header_passed_to_render = 0;
+    ctx->is_zero_copy_rendering = is_zero_copy_rendering;
     ctxs[camera_number][idx] = ctx;
 
     fcp->camera_number = camera_number;
     fcp->splitter_output_port_index = idx;
-    fcp->is_zero_copy_rendering = is_zero_copy_rendering;
     fcp->ctx = ctx;
 
 end:
@@ -337,6 +372,23 @@ int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
     int ret = 0;
 
     memcpy(&renders_config[fcp->camera_number][fcp->splitter_output_port_index].region, &region, sizeof(region));
+
+    return ret;
+}
+
+int rpigrafx_config_frame_render(const int32_t buffer_width,
+                                 const int32_t buffer_height,
+                                 const MMAL_FOURCC_T buffer_encoding,
+                                 const MMAL_DISPLAYREGION_T render_region,
+                                 rpigrafx_frame_config_t *fcp)
+{
+    struct renders_config *cfg = &renders_config[fcp->camera_number][fcp->splitter_output_port_index];
+    int ret = 0;
+
+    cfg->buffer_width  = buffer_width;
+    cfg->buffer_height = buffer_height;
+    cfg->buffer_encoding = buffer_encoding;
+    memcpy(&cfg->region, &render_region, sizeof(cfg->region));
 
     return ret;
 }
@@ -615,7 +667,8 @@ end:
 }
 
 static int setup_cp_isp(const int i, const int j,
-                        const int32_t width, const int32_t height)
+                        const int32_t width, const int32_t height,
+                        const _Bool is_zero_copy_rendering)
 {
     MMAL_STATUS_T status;
     int ret = 0;
@@ -700,6 +753,28 @@ static int setup_cp_isp(const int i, const int j,
             ret = 1;
             goto end;
         }
+
+        if (!is_zero_copy_rendering) {
+            MMAL_POOL_T *pool = NULL;
+            ret = create_port_pool(&pool, &ctxs[i][j]->output_buffer_length,
+                                   output,
+                                   isps_config[i][j].encoding,
+                                   isps_config[i][j].width,
+                                   isps_config[i][j].height);
+            if (ret) {
+                print_error("Creating port pool failed: 0x%08x", ret);
+                goto end;
+            }
+            ctxs[i][j]->output_pool = pool;
+
+            status = mmal_port_enable(output, callback_control);
+            if (status != MMAL_SUCCESS) {
+                print_error("Enabling output port of " \
+                            "isp %d,%d failed: 0x%08x", i, j, status);
+                ret = 1;
+                goto end;
+            }
+        }
     }
     status = mmal_component_enable(cp_isps[i][j]);
     if (status != MMAL_SUCCESS) {
@@ -712,7 +787,8 @@ end:
     return ret;
 }
 
-static int setup_cp_render(const int i, const int j)
+static int setup_cp_render(const int i, const int j,
+                           const _Bool is_zero_copy_rendering)
 {
     MMAL_STATUS_T status;
     int ret = 0;
@@ -752,9 +828,9 @@ static int setup_cp_render(const int i, const int j)
         }
 
         status = config_port(input,
-                             isps_config[i][j].encoding,
-                             isps_config[i][j].width,
-                             isps_config[i][j].height);
+                             renders_config[i][j].buffer_encoding,
+                             renders_config[i][j].buffer_width,
+                             renders_config[i][j].buffer_height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "render %d input %d failed: 0x%08x", i, j, status);
@@ -777,6 +853,28 @@ static int setup_cp_render(const int i, const int j)
                         "isp %d input %d failed: 0x%08x", i, j, status);
             ret = 1;
             goto end;
+        }
+
+        if (!is_zero_copy_rendering) {
+            MMAL_POOL_T *pool = NULL;
+            ret = create_port_pool(&pool, &ctxs[i][j]->input_buffer_length,
+                                   input,
+                                   renders_config[i][j].buffer_encoding,
+                                   renders_config[i][j].buffer_width,
+                                   renders_config[i][j].buffer_height);
+            if (ret) {
+                print_error("Creating port pool failed: 0x%08x", ret);
+                goto end;
+            }
+            ctxs[i][j]->input_pool = pool;
+
+            status = mmal_port_enable(input, callback_control);
+            if (status != MMAL_SUCCESS) {
+                print_error("Enabling input port of "
+                            "render %d,%d failed: 0x%08x", i, j, status);
+                ret = 1;
+                goto end;
+            }
         }
     }
     status = mmal_component_enable(cp_renders[i][j]);
@@ -930,9 +1028,11 @@ int rpigrafx_finish_config()
             if ((ret = setup_cp_null(i, max_width, max_height)))
                 goto end;
         for (j = 0; j < len; j ++) {
-            if ((ret = setup_cp_isp(i, j, max_width, max_height)))
+            const _Bool is_zero_copy_rendering = ctxs[i][j]->is_zero_copy_rendering;
+            if ((ret = setup_cp_isp(i, j, max_width, max_height,
+                                    is_zero_copy_rendering)))
                 goto end;
-            if ((ret = setup_cp_render(i, j)))
+            if ((ret = setup_cp_render(i, j, is_zero_copy_rendering)))
                 goto end;
         }
         if ((ret = connect_ports(i, len)))
@@ -965,6 +1065,9 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
             goto end;
         }
     }
+
+    if (!fcp->ctx->is_zero_copy_rendering)
+        goto end;
 
     if (ctx->header != NULL && !ctx->is_header_passed_to_render) {
         if (priv_rpigrafx_verbose)
@@ -1023,6 +1126,37 @@ void* rpigrafx_get_frame(rpigrafx_frame_config_t *fcp)
 
 end:
     return ret;
+}
+
+void* rpigrafx_get_output_frame(rpigrafx_frame_config_t *fcp)
+{
+    MMAL_BUFFER_HEADER_T *header = NULL, **lastp = &fcp->ctx->last_output_header;
+
+    if (*lastp != NULL) {
+        mmal_buffer_header_release(*lastp);
+        *lastp = NULL;
+    }
+
+    header = mmal_queue_wait(fcp->ctx->output_pool->queue);
+    header->length = fcp->ctx->output_buffer_length;
+    header->flags = MMAL_BUFFER_HEADER_FLAG_EOS;
+
+    *lastp = header;
+
+    return header;
+}
+
+void* rpigrafx_get_input_frame(rpigrafx_frame_config_t *fcp)
+{
+    MMAL_BUFFER_HEADER_T *header = NULL, **lastp = &fcp->ctx->last_input_header;
+
+    header = mmal_queue_wait(fcp->ctx->input_pool->queue);
+    header->length = fcp->ctx->input_buffer_length;
+    header->flags = MMAL_BUFFER_HEADER_FLAG_EOS;
+
+    *lastp = header;
+
+    return header;
 }
 
 int rpigrafx_render_frame(rpigrafx_frame_config_t *fcp)
