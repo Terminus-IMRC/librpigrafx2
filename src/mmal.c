@@ -1179,8 +1179,6 @@ void* rpigrafx_get_output_frame(rpigrafx_frame_config_t *fcp)
     }
 
     header = mmal_queue_wait(fcp->ctx->non_zero_copy_isp_queue);
-    header->length = fcp->ctx->output_buffer_length;
-    header->flags = MMAL_BUFFER_HEADER_FLAG_EOS;
 
     *lastp = header;
 
