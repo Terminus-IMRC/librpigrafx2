@@ -18,6 +18,7 @@
         MMAL_STATUS_T status;
         MMAL_BUFFER_HEADER_T *header;
         MMAL_POOL_T *output_pool, *input_pool;
+        MMAL_QUEUE_T *non_zero_copy_isp_queue;
         uint32_t output_buffer_length, input_buffer_length;
         MMAL_BUFFER_HEADER_T *last_output_header, *last_input_header;
         _Bool is_header_passed_to_render;

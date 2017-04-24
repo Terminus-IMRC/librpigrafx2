@@ -244,6 +244,18 @@ static void callback_control(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
     mmal_buffer_header_release(header);
 }
 
+static void callback_non_zero_copy_isp(MMAL_PORT_T *port, MMAL_BUFFER_HEADER_T *header)
+{
+    MMAL_QUEUE_T *queue = (MMAL_QUEUE_T*) port->userdata;
+
+    if (priv_rpigrafx_verbose) {
+        print_error("Called by a port %s", port->name);
+        WARN_HEADER("Got header ", header, "; Queuing");
+    }
+
+    mmal_queue_put(queue, header);
+}
+
 static void callback_conn(MMAL_CONNECTION_T *conn)
 {
     if (priv_rpigrafx_verbose)
@@ -756,6 +768,9 @@ static int setup_cp_isp(const int i, const int j,
 
         if (!is_zero_copy_rendering) {
             MMAL_POOL_T *pool = NULL;
+            MMAL_QUEUE_T *queue = NULL;
+            MMAL_BUFFER_HEADER_T *header = NULL;
+
             ret = create_port_pool(&pool, &ctxs[i][j]->output_buffer_length,
                                    output,
                                    isps_config[i][j].encoding,
@@ -767,12 +782,31 @@ static int setup_cp_isp(const int i, const int j,
             }
             ctxs[i][j]->output_pool = pool;
 
-            status = mmal_port_enable(output, callback_control);
+            queue = mmal_queue_create();
+            if (queue == NULL) {
+                print_error("Creating queue failed");
+                ret = 1;
+                goto end;
+            }
+            ctxs[i][j]->non_zero_copy_isp_queue = queue;
+
+            output->userdata = (void*) queue;
+            status = mmal_port_enable(output, callback_non_zero_copy_isp);
             if (status != MMAL_SUCCESS) {
                 print_error("Enabling output port of " \
                             "isp %d,%d failed: 0x%08x", i, j, status);
                 ret = 1;
                 goto end;
+            }
+
+            while ((header = mmal_queue_get(pool->queue)) != NULL) {
+                status = mmal_port_send_buffer(output, header);
+                if (status != MMAL_SUCCESS) {
+                    print_error("Sending header to the output port of "
+                                "isp %d,%d failed: 0x%08x", i, j, status);
+                    ret = 1;
+                    goto end;
+                }
             }
         }
     }
@@ -1144,7 +1178,7 @@ void* rpigrafx_get_output_frame(rpigrafx_frame_config_t *fcp)
         *lastp = NULL;
     }
 
-    header = mmal_queue_wait(fcp->ctx->output_pool->queue);
+    header = mmal_queue_wait(fcp->ctx->non_zero_copy_isp_queue);
     header->length = fcp->ctx->output_buffer_length;
     header->flags = MMAL_BUFFER_HEADER_FLAG_EOS;
 
