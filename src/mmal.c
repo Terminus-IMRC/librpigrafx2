@@ -453,7 +453,7 @@ static int setup_cp_null(const int i,
     MMAL_STATUS_T status;
     int ret = 0;
 
-    status = mmal_component_create("vc.null_sink", &cp_nulls[i]);
+    status = mmal_component_create("vc.ril.null_sink", &cp_nulls[i]);
     if (status != MMAL_SUCCESS) {
         print_error("Creating null component of camera %d failed: 0x%08x",
                     i, status);
@@ -480,7 +480,7 @@ static int setup_cp_null(const int i,
     }
     {
         MMAL_PORT_T *input = mmal_util_get_port(cp_nulls[i],
-                                                MMAL_PORT_TYPE_INPUT, 0);
+                                                MMAL_PORT_TYPE_INPUT, 1);
 
         if (input == NULL) {
             print_error("Getting input port of null %d failed", i);
@@ -801,7 +801,7 @@ static int connect_ports(const int i, const int len)
         /* Connect camera preview port to null for AWB processing. */
         status = mmal_connection_create(&conn_camera_nulls[i],
                                         cp_cameras[i]->output[CAMERA_PREVIEW_PORT],
-                                        cp_nulls[i]->input[0],
+                                        cp_nulls[i]->input[1],
                                         MMAL_CONNECTION_FLAG_TUNNELLING);
         if (status != MMAL_SUCCESS) {
             print_error("Connecting " \
