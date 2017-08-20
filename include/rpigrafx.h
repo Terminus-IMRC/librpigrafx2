@@ -53,6 +53,7 @@
 
     int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp);
     void* rpigrafx_get_frame(rpigrafx_frame_config_t *fcp);
+    int rpigrafx_free_frame(rpigrafx_frame_config_t *fcp);
     /*void* rpigrafx_get_output_buffer(rpigrafx_frame_config_t *fcp);*/
     /*void* rpigrafx_get_input_buffer(rpigrafx_frame_config_t *fcp);*/
     int rpigrafx_register_frame_pool_to_qmkl(rpigrafx_frame_config_t *fcp);

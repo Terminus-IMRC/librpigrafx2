@@ -966,13 +966,11 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
         }
     }
 
-    if (ctx->header != NULL && !ctx->is_header_passed_to_render) {
-        if (priv_rpigrafx_verbose)
-            WARN_HEADER("Releasing header ", ctx->header, "");
-        mmal_buffer_header_release(ctx->header);
+    ret = rpigrafx_free_frame(fcp);
+    if (ret) {
+        print_error("rpigrafx_free_frame failed: %d\n", ret);
+        return ret;
     }
-    ctx->header = NULL;
-    ctx->is_header_passed_to_render = 0;
 
 retry:
 
@@ -1022,6 +1020,22 @@ void* rpigrafx_get_frame(rpigrafx_frame_config_t *fcp)
     ret = ctx->header->data;
 
 end:
+    return ret;
+}
+
+int rpigrafx_free_frame(rpigrafx_frame_config_t *fcp)
+{
+    struct callback_context *ctx = fcp->ctx;
+    int ret = 0;
+
+    if (ctx->header != NULL && !ctx->is_header_passed_to_render) {
+        if (priv_rpigrafx_verbose)
+            WARN_HEADER("Releasing header ", ctx->header, "");
+        mmal_buffer_header_release(ctx->header);
+    }
+    ctx->header = NULL;
+    ctx->is_header_passed_to_render = 0;
+
     return ret;
 }
 
