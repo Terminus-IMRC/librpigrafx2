@@ -81,10 +81,11 @@ static void usage()
             " Misc options:\n"
             "\n"
             "  -g                 Get frame pointer after capture\n"
-            "  -s TIME            Interval between capture and render, in ms (default: 0)\n"
+            "  -s TIME            Interval between rendering (or freeing frame) and next capture, in ms (default: 0)\n"
             "  -q                 Turn off/on QPU before/after each capture\n"
             "  -S                 Save frame to \"%%08d.ppm\"\n"
             "  -R                 Disable rendering\n"
+            "  -F                 Manually free frame after rendering\n"
             "  -v [VERBOSE]       Be verbose or not (default: 1)\n"
             "  -?                 What you are doing\n"
            );
@@ -98,7 +99,8 @@ int main(int argc, char *argv[])
     int render_x = 0, render_y = 0, render_width, render_height;
     uint32_t interval = 0;
     int mb = -1;
-    _Bool get_frame = 0, on_off_qpu = 0, save_frame = 0, no_render = 0;
+    _Bool get_frame = 0, on_off_qpu = 0, save_frame = 0, no_render = 0,
+          manually_free_frame = 0;
     int verbose = 1;
     rpigrafx_camera_port_t camera_port = RPIGRAFX_CAMERA_PORT_PREVIEW;
     rpigrafx_frame_config_t fc;
@@ -111,7 +113,7 @@ int main(int argc, char *argv[])
     render_width  = width;
     render_height = height;
 
-    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:gs:qSRv::?")) != -1) {
+    while ((opt = getopt(argc, argv, "c:PCw:h:n:f::x:y:W:H:l:gs:qSRFv::?")) != -1) {
         switch (opt) {
             case 'c':
                 camera_num = atoi(optarg);
@@ -164,6 +166,9 @@ int main(int argc, char *argv[])
             case 'R':
                 no_render = 1;
                 break;
+            case 'F':
+                manually_free_frame = 1;
+                break;
             case 'v':
                 verbose = (optarg == 0) ? 1 : !!atoi(optarg);
                 break;
@@ -207,11 +212,13 @@ int main(int argc, char *argv[])
             p = rpigrafx_get_frame(&fc);
             fprintf(stderr, "Got frame %p\n", p);
         }
-        vcos_sleep(interval);
         if (save_frame)
             save_image(i, p, width, height);
         if (!no_render)
             _check(rpigrafx_render_frame(&fc));
+        if (manually_free_frame)
+            rpigrafx_free_frame(&fc);
+        vcos_sleep(interval);
     }
     time = get_time() - start;
     fprintf(stderr, "%f [s], %f [frame/s]\n", time, nframes / time);
