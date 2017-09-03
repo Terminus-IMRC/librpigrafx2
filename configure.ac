@@ -69,6 +69,14 @@ AC_CHECK_LIB([qmkl], [mailbox_qpu_enable],
              [QMKL_LIBS=-lqmkl
               AC_SUBST(QMKL_LIBS)],
              [AC_MSG_ERROR("missing -lqmkl")])
+PKG_CHECK_MODULES([RPICAM], [librpicam],
+                 [AC_SUBST([RPICAM_CFLAGS])
+                  AC_SUBST([RPICAM_LIBS])],
+                 [AC_MSG_ERROR("missing -lrpicam")])
+PKG_CHECK_MODULES([RPIRAW], [librpiraw],
+                  [AC_SUBST([RPIRAW_CFLAGS])
+                  AC_SUBST([RPIRAW_LIBS])],
+                 [AC_MSG_ERROR("missing -lrpiraw")])
 
 # Checks for header files.
 AC_CHECK_HEADERS([stdio.h stdint.h stdlib.h])
