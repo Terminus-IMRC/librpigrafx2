@@ -12,6 +12,9 @@
 
 ## Installation
 
+You need to install [librpicam](https://github.com/Idein/librpicam) and
+[librpiraw](https://github.com/Idein/librpiraw) to use rawcam (described below).
+
 ```
 $ autoreconf -i -m
 $ PKG_CONFIG_PATH=/opt/vc/lib/pkgconfig ./configure
