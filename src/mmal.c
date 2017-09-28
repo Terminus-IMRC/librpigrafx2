@@ -13,10 +13,22 @@
 #include <interface/mmal/util/mmal_connection.h>
 #include <interface/mmal/util/mmal_component_wrapper.h>
 #include <interface/mmal/util/mmal_default_components.h>
-#include <rpicam.h>
-#include <rpiraw.h>
 #include "rpigrafx.h"
 #include "local.h"
+#include "config.h"
+
+#ifdef HAVE_RPICAM
+#include <rpicam.h>
+#endif /* HAVE_RPICAM */
+
+#ifdef HAVE_RPIRAW
+#include <rpiraw.h>
+#endif /* HAVE_RPICAM */
+
+#if defined(HAVE_RPICAM) && defined(HAVE_RPIRAW)
+#define IMPL_RAWCAM 1
+#endif /* defined(HAVE_RPICAM) && defined(HAVE_RPIRAW) */
+
 
 #define MAX_CAMERAS          MMAL_PARAMETER_CAMERA_INFO_MAX_CAMERAS
 #define NUM_SPLITTER_OUTPUTS 4
@@ -58,7 +70,9 @@ static int32_t num_cameras = 0;
  */
 
 static MMAL_COMPONENT_T *cp_cameras[MAX_CAMERAS];
+#ifdef IMPL_RAWCAM
 static MMAL_WRAPPER_T *cpw_rawcams[MAX_CAMERAS];
+#endif /* IMPL_RAWCAM */
 static struct cameras_config {
     _Bool is_used;
     int32_t width, height;
@@ -67,6 +81,7 @@ static struct cameras_config {
     _Bool use_camera_capture_port;
 
     _Bool is_rawcam;
+#ifdef IMPL_RAWCAM
     MMAL_FOURCC_T raw_encoding;
     rpigrafx_rawcam_camera_model_t rawcam_camera_model;
     unsigned nbits_of_raw_from_camera;
@@ -74,6 +89,7 @@ static struct cameras_config {
     union {
         struct rpicam_imx219_config imx219;
     } rpicam_config;
+#endif /* IMPL_RAWCAM */
 } cameras_config[MAX_CAMERAS];
 
 static MMAL_COMPONENT_T *cp_splitters[MAX_CAMERAS];
@@ -140,6 +156,7 @@ int priv_rpigrafx_mmal_init()
     for (i = 0; i < MAX_CAMERAS; i ++) {
         cp_cameras[i] = NULL;
         cameras_config[i].is_used = 0;
+        cameras_config[i].is_rawcam = 0;
         if ((ret = rpigrafx_config_camera_port(i,
                                                RPIGRAFX_CAMERA_PORT_PREVIEW)))
             goto end;
@@ -330,6 +347,8 @@ int rpigrafx_config_rawcam(const rpigrafx_rawcam_camera_model_t camera_model,
                            const rpigrafx_bayer_pattern_t bayer_pattern,
                            rpigrafx_frame_config_t *fcp)
 {
+#ifdef IMPL_RAWCAM
+
     uint32_t image_id;
     MMAL_PARAMETER_CAMERA_RX_CONFIG_T rx_cfg;
     MMAL_FOURCC_T encoding = MMAL_FOURCC('\0', '\0', '\0', '\0');
@@ -416,6 +435,23 @@ int rpigrafx_config_rawcam(const rpigrafx_rawcam_camera_model_t camera_model,
 
 end:
     return ret;
+
+#else /* IMPL_RAWCAM */
+
+    MMAL_PARAM_UNUSED(camera_model);
+    MMAL_PARAM_UNUSED(decode);
+    MMAL_PARAM_UNUSED(encode);
+    MMAL_PARAM_UNUSED(unpack);
+    MMAL_PARAM_UNUSED(pack);
+    MMAL_PARAM_UNUSED(data_lanes);
+    MMAL_PARAM_UNUSED(nbits_of_raw_from_camera);
+    MMAL_PARAM_UNUSED(bayer_pattern);
+    MMAL_PARAM_UNUSED(fcp);
+
+    print_error("librpicam and librpiraw is needed to use rawcam");
+    return 1;
+
+#endif /* IMPL_RAWCAM */
 }
 
 int rpigrafx_config_rawcam_imx219(const float exck_freq,
@@ -425,6 +461,8 @@ int rpigrafx_config_rawcam_imx219(const float exck_freq,
                                                                    binning_mode,
                                   rpigrafx_frame_config_t *fcp)
 {
+#ifdef IMPL_RAWCAM
+
     struct rpicam_imx219_config cfg;
     int ret = 0;
 
@@ -467,6 +505,21 @@ int rpigrafx_config_rawcam_imx219(const float exck_freq,
 
 end:
     return ret;
+
+#else /* IMPL_RAWCAM */
+
+    MMAL_PARAM_UNUSED(exck_freq);
+    MMAL_PARAM_UNUSED(x);
+    MMAL_PARAM_UNUSED(y);
+    MMAL_PARAM_UNUSED(orient_hori);
+    MMAL_PARAM_UNUSED(orient_vert);
+    MMAL_PARAM_UNUSED(binning_mode);
+    MMAL_PARAM_UNUSED(fcp);
+
+    print_error("librpicam and librpiraw is needed to use rawcam");
+    return 1;
+
+#endif /* IMPL_RAWCAM */
 }
 
 int rpigrafx_config_camera_port(const int32_t camera_number,
@@ -525,6 +578,8 @@ int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
 static int setup_cp_camera_rawcam(const int i,
                                   const int32_t width, const int32_t height)
 {
+#ifdef IMPL_RAWCAM
+
     MMAL_STATUS_T status;
     int ret = 0;
 
@@ -612,6 +667,17 @@ static int setup_cp_camera_rawcam(const int i,
 
 end:
     return ret;
+
+#else /* IMPL_RAWCAM */
+
+    MMAL_PARAM_UNUSED(i);
+    MMAL_PARAM_UNUSED(width);
+    MMAL_PARAM_UNUSED(height);
+
+    print_error("librpicam and librpiraw is needed to use rawcam");
+    return 1;
+
+#endif /* IMPL_RAWCAM */
 }
 
 static int setup_cp_camera(const int i,
@@ -1285,11 +1351,6 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
     struct cameras_config *cfg = &cameras_config[fcp->camera_number];
     int ret = 0;
     MMAL_BUFFER_HEADER_T *header = NULL;
-    const int32_t width = cfg->width,
-                  height = cfg->height,
-                  /* Stride in header->data. */
-                  stride = ALIGN_UP(width, 32),
-                  raw_width = rpiraw_width_raw8_to_raw10_rpi(width);
     MMAL_STATUS_T status;
 
     if (cfg->use_camera_capture_port) {
@@ -1313,7 +1374,13 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
         return ret;
     }
 
+#ifdef IMPL_RAWCAM
     if (cfg->is_rawcam) {
+        const int32_t width = cfg->width,
+                      height = cfg->height,
+                      /* Stride in header->data. */
+                      stride = ALIGN_UP(width, 32),
+                      raw_width = rpiraw_width_raw8_to_raw10_rpi(width);
         for (; ; ) {
             MMAL_PORT_T *output = cpw_rawcams[fcp->camera_number]->output[0],
                         *input = cpw_splitters[fcp->camera_number]->input[0];
@@ -1427,6 +1494,7 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
             break;
         }
     }
+#endif /* IMPL_RAWCAM */
 
     for (; ; ) {
         MMAL_CONNECTION_T *conn = conn_isps_renders[fcp->camera_number]

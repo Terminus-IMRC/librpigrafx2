@@ -21,7 +21,9 @@ AC_SUBST([pkgconfigdir])
 AC_PROG_CC
 AM_PROG_AR
 
+
 # Checks for libraries.
+
 PKG_CHECK_MODULES([BCM_HOST], [bcm_host],
                   [AC_SUBST([BCM_HOST_CFLAGS])
                    AC_SUBST([BCM_HOST_LIBS])],
@@ -37,6 +39,7 @@ if test "$librpigrafx_cv_have_bcm_host" = "no"; then
                [],
                [AC_MSG_ERROR("missing -lbcm_host")])
 fi
+
 PKG_CHECK_MODULES([MMAL], [mmal],
                   [AC_SUBST([MMAL_CFLAGS])
                    AC_SUBST([MMAL_LIBS])],
@@ -65,18 +68,30 @@ if test "$librpigrafx_cv_have_mmal" = "no"; then
                [],
                [AC_MSG_ERROR("missing -lmmal_vc_client")])
 fi
+
 AC_CHECK_LIB([qmkl], [mailbox_qpu_enable],
              [QMKL_LIBS=-lqmkl
               AC_SUBST(QMKL_LIBS)],
              [AC_MSG_ERROR("missing -lqmkl")])
+
 PKG_CHECK_MODULES([RPICAM], [librpicam],
-                 [AC_SUBST([RPICAM_CFLAGS])
+                  [_have_rpicam=yes
+                  AC_SUBST([RPICAM_CFLAGS])
                   AC_SUBST([RPICAM_LIBS])],
-                 [AC_MSG_ERROR("missing -lrpicam")])
+                  [have_rpicam=no])
+AS_IF([test x${_have_rpicam} = "xyes"],
+      [AC_DEFINE([HAVE_RPICAM], 1, [Define to 1 if you have librpicam.])])
+AM_CONDITIONAL([HAVE_RPICAM], [test "x${_have_rpicam}" = "xyes"])
+
 PKG_CHECK_MODULES([RPIRAW], [librpiraw],
-                  [AC_SUBST([RPIRAW_CFLAGS])
+                  [_have_rpiraw=yes
+                  AC_SUBST([RPIRAW_CFLAGS])
                   AC_SUBST([RPIRAW_LIBS])],
-                 [AC_MSG_ERROR("missing -lrpiraw")])
+                  [have_rpiraw=no])
+AS_IF([test x${_have_rpiraw} = "xyes"],
+      [AC_DEFINE([HAVE_RPIRAW], 1, [Define to 1 if you have librpiraw.])])
+AM_CONDITIONAL([HAVE_RPIRAW], [test "x${_have_rpiraw}" = "xyes"])
+
 
 # Checks for header files.
 AC_CHECK_HEADERS([stdio.h stdint.h stdlib.h])
