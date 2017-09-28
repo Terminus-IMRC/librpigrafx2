@@ -67,6 +67,7 @@ static struct cameras_config {
     _Bool use_camera_capture_port;
 
     _Bool is_rawcam;
+    MMAL_FOURCC_T raw_encoding;
     rpigrafx_rawcam_camera_model_t rawcam_camera_model;
     unsigned nbits_of_raw_from_camera;
     MMAL_PARAMETER_CAMERA_RX_CONFIG_T rx_cfg;
@@ -326,34 +327,71 @@ int rpigrafx_config_rawcam(const rpigrafx_rawcam_camera_model_t camera_model,
                            const MMAL_CAMERA_RX_CONFIG_PACK   pack,
                            const uint32_t data_lanes,
                            const uint32_t nbits_of_raw_from_camera,
+                           const rpigrafx_bayer_pattern_t bayer_pattern,
                            rpigrafx_frame_config_t *fcp)
 {
     uint32_t image_id;
     MMAL_PARAMETER_CAMERA_RX_CONFIG_T rx_cfg;
+    MMAL_FOURCC_T encoding = MMAL_FOURCC('\0', '\0', '\0', '\0');
     int ret = 0;
 
     /*
      * See the MIPI specification for the values. If your one's version is
      * 1.01.00 r0.04 2-Apr-2009, they're on p.88.
+     * 6, 7 and 14 is also supported by MIPI but the Raspberry Pi firmware
+     * doen't for now.
      */
     switch (nbits_of_raw_from_camera) {
-        case 6:
-            image_id = 0x28;
-            break;
-        case 7:
-            image_id = 0x29;
-            break;
         case 8:
             image_id = 0x2a;
+            switch (bayer_pattern) {
+                case RPIGRAFX_BAYER_PATTERN_BGGR:
+                    encoding = MMAL_ENCODING_BAYER_SBGGR8;
+                    break;
+                case RPIGRAFX_BAYER_PATTERN_GRBG:
+                    encoding = MMAL_ENCODING_BAYER_SGRBG8;
+                    break;
+                case RPIGRAFX_BAYER_PATTERN_GBRG:
+                    encoding = MMAL_ENCODING_BAYER_SGBRG8;
+                    break;
+                case RPIGRAFX_BAYER_PATTERN_RGGB:
+                    encoding = MMAL_ENCODING_BAYER_SRGGB8;
+                    break;
+            }
             break;
         case 10:
             image_id = 0x2b;
+            switch (bayer_pattern) {
+                case RPIGRAFX_BAYER_PATTERN_BGGR:
+                    encoding = MMAL_ENCODING_BAYER_SBGGR10P;
+                    break;
+                case RPIGRAFX_BAYER_PATTERN_GRBG:
+                    encoding = MMAL_ENCODING_BAYER_SGRBG10P;
+                    break;
+                case RPIGRAFX_BAYER_PATTERN_GBRG:
+                    encoding = MMAL_ENCODING_BAYER_SGBRG10P;
+                    break;
+                case RPIGRAFX_BAYER_PATTERN_RGGB:
+                    encoding = MMAL_ENCODING_BAYER_SRGGB10P;
+                    break;
+            }
             break;
         case 12:
             image_id = 0x2c;
-            break;
-        case 14:
-            image_id = 0x2d;
+            switch (bayer_pattern) {
+                case RPIGRAFX_BAYER_PATTERN_BGGR:
+                    encoding = MMAL_ENCODING_BAYER_SBGGR12P;
+                    break;
+                case RPIGRAFX_BAYER_PATTERN_GRBG:
+                    encoding = MMAL_ENCODING_BAYER_SGRBG12P;
+                    break;
+                case RPIGRAFX_BAYER_PATTERN_GBRG:
+                    encoding = MMAL_ENCODING_BAYER_SGBRG12P;
+                    break;
+                case RPIGRAFX_BAYER_PATTERN_RGGB:
+                    encoding = MMAL_ENCODING_BAYER_SRGGB12P;
+                    break;
+            }
             break;
         default:
             print_error("Unsupported number of bits of raw from camera: %u",
@@ -374,6 +412,7 @@ int rpigrafx_config_rawcam(const rpigrafx_rawcam_camera_model_t camera_model,
 
     cameras_config[fcp->camera_number].rawcam_camera_model = camera_model;
     cameras_config[fcp->camera_number].is_rawcam = !0;
+    cameras_config[fcp->camera_number].raw_encoding = encoding;
 
 end:
     return ret;
@@ -489,6 +528,14 @@ static int setup_cp_camera_rawcam(const int i,
     MMAL_STATUS_T status;
     int ret = 0;
 
+    status = mmal_wrapper_create(&cpw_rawcams[i], "vc.ril.rawcam");
+    if (status != MMAL_SUCCESS) {
+        print_error("Creating rawcam component of camera %d failed: 0x%08x",
+                    i, status);
+        ret = 1;
+        goto end;
+    }
+
     switch (cameras_config[i].rawcam_camera_model) {
         case RPIGRAFX_RAWCAM_CAMERA_MODEL_IMX219: {
             struct rpicam_imx219_config *stp = &cameras_config[i]
@@ -501,14 +548,6 @@ static int setup_cp_camera_rawcam(const int i,
         }
     }
 
-    status = mmal_wrapper_create(&cpw_rawcams[i], "vc.ril.rawcam");
-    if (status != MMAL_SUCCESS) {
-        print_error("Creating rawcam component of camera %d failed: 0x%08x",
-                    i, status);
-        ret = 1;
-        goto end;
-    }
-
     {
         MMAL_PORT_T *output = mmal_util_get_port(cpw_rawcams[i]->component,
                                                  MMAL_PORT_TYPE_OUTPUT, 0);
@@ -518,6 +557,7 @@ static int setup_cp_camera_rawcam(const int i,
                 .size = sizeof(rx_cfg)
             }
         };
+        MMAL_FOURCC_T encoding = cameras_config[i].raw_encoding;
 
         if (output == NULL) {
             print_error("Getting output %d of camera %d failed", 0, i);
@@ -525,8 +565,7 @@ static int setup_cp_camera_rawcam(const int i,
             goto end;
         }
 
-        /* xxx: Change the encoding according to nbits_of_raw_from_camera. */
-        status = config_port(output, MMAL_ENCODING_BAYER_SBGGR10P, width, height);
+        status = config_port(output, encoding, width, height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of camera %d failed: 0x%08x",
                         i, status);
@@ -1330,7 +1369,6 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
                 goto end;
             }
 
-            print_error("length = %d, alloc = %d, flags = 0x%08x", header->length, header->alloc_size, header->flags);
             /* xxx: Add stride argument to this call. */
             ret = rpiraw_convert_raw10_to_raw8(raw8, header->data,
                                                width, height, raw_width);

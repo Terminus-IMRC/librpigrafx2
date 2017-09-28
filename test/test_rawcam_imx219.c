@@ -25,7 +25,7 @@ int main()
                                   MMAL_CAMERA_RX_CONFIG_ENCODE_NONE,
                                   MMAL_CAMERA_RX_CONFIG_UNPACK_NONE,
                                   MMAL_CAMERA_RX_CONFIG_PACK_NONE,
-                                  2, 10, &fc));
+                                  2, 10, RPIGRAFX_BAYER_PATTERN_BGGR, &fc));
     _check(rpigrafx_config_rawcam_imx219(24.0, 0, 0, 1, 1,
                                        RPIGRAFX_RAWCAM_IMX219_BINNING_MODE_NONE,
                                          &fc));

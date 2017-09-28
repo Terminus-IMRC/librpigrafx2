@@ -37,6 +37,13 @@
     } rpigrafx_rawcam_camera_model_t;
 
     typedef enum {
+        RPIGRAFX_BAYER_PATTERN_BGGR,
+        RPIGRAFX_BAYER_PATTERN_GRBG,
+        RPIGRAFX_BAYER_PATTERN_GBRG,
+        RPIGRAFX_BAYER_PATTERN_RGGB
+    } rpigrafx_bayer_pattern_t;
+
+    typedef enum {
         RPIGRAFX_RAWCAM_IMX219_BINNING_MODE_NONE
     } rpigrafx_rawcam_imx219_binning_mode_t;
 
@@ -56,6 +63,7 @@
                                const MMAL_CAMERA_RX_CONFIG_PACK   pack,
                                const uint32_t data_lanes,
                                const uint32_t nbits_of_raw_from_camera,
+                               const rpigrafx_bayer_pattern_t bayer_pattern,
                                rpigrafx_frame_config_t *fcp);
     int rpigrafx_config_rawcam_imx219(const float exck_freq,
                                       uint_least16_t x, uint_least16_t y,
