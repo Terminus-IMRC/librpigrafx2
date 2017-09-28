@@ -32,6 +32,21 @@
         RPIGRAFX_CAMERA_PORT_CAPTURE
     } rpigrafx_camera_port_t;
 
+    typedef enum {
+        RPIGRAFX_RAWCAM_CAMERA_MODEL_IMX219
+    } rpigrafx_rawcam_camera_model_t;
+
+    typedef enum {
+        RPIGRAFX_BAYER_PATTERN_BGGR,
+        RPIGRAFX_BAYER_PATTERN_GRBG,
+        RPIGRAFX_BAYER_PATTERN_GBRG,
+        RPIGRAFX_BAYER_PATTERN_RGGB
+    } rpigrafx_bayer_pattern_t;
+
+    typedef enum {
+        RPIGRAFX_RAWCAM_IMX219_BINNING_MODE_NONE
+    } rpigrafx_rawcam_imx219_binning_mode_t;
+
     int rpigrafx_init()     __attribute__((constructor));
     int rpigrafx_finalize() __attribute__((destructor));
 
@@ -40,6 +55,22 @@
                                      const MMAL_FOURCC_T encoding,
                                      const _Bool is_zero_copy_rendering,
                                      rpigrafx_frame_config_t *fcp);
+    int rpigrafx_config_rawcam(const rpigrafx_rawcam_camera_model_t
+                                                                   camera_model,
+                               const MMAL_CAMERA_RX_CONFIG_DECODE decode,
+                               const MMAL_CAMERA_RX_CONFIG_ENCODE encode,
+                               const MMAL_CAMERA_RX_CONFIG_UNPACK unpack,
+                               const MMAL_CAMERA_RX_CONFIG_PACK   pack,
+                               const uint32_t data_lanes,
+                               const uint32_t nbits_of_raw_from_camera,
+                               const rpigrafx_bayer_pattern_t bayer_pattern,
+                               rpigrafx_frame_config_t *fcp);
+    int rpigrafx_config_rawcam_imx219(const float exck_freq,
+                                      uint_least16_t x, uint_least16_t y,
+                                      _Bool orient_hori, _Bool orient_vert,
+                                      rpigrafx_rawcam_imx219_binning_mode_t
+                                                                   binning_mode,
+                                      rpigrafx_frame_config_t *fcp);
     int rpigrafx_config_camera_port(const int32_t camera_number,
                                     const rpigrafx_camera_port_t camera_port);
     int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
