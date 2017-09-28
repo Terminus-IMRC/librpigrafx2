@@ -493,6 +493,8 @@ static int setup_cp_camera_rawcam(const int i,
         case RPIGRAFX_RAWCAM_CAMERA_MODEL_IMX219: {
             struct rpicam_imx219_config *stp = &cameras_config[i]
                                                           .rpicam_config.imx219;
+            stp->width = width;
+            stp->height = height;
             if ((ret = rpicam_imx219_open(stp)))
                 goto end;
             break;
@@ -505,26 +507,6 @@ static int setup_cp_camera_rawcam(const int i,
                     i, status);
         ret = 1;
         goto end;
-    }
-
-    {
-        MMAL_PORT_T *control = mmal_util_get_port(cpw_rawcams[i]->component,
-                                                  MMAL_PORT_TYPE_CONTROL, 0);
-
-        if (control == NULL) {
-            print_error("Getting control port of camera %d failed", i);
-            ret = 1;
-            goto end;
-        }
-
-        //status = mmal_port_parameter_set_int32(control,
-                                               //MMAL_PARAMETER_CAMERA_NUM, i);
-        if (status != MMAL_SUCCESS) {
-            print_error("Setting camera_num of camera %d failed: 0x%08x",
-                        i, status);
-            ret = 1;
-            goto end;
-        }
     }
 
     {
@@ -834,14 +816,15 @@ static int setup_cp_splitter(const int i, const int len,
         }
 
         if (!is_rawcam) {
-        status = mmal_port_parameter_set_boolean(input,
-                                            MMAL_PARAMETER_ZERO_COPY, MMAL_TRUE);
-        if (status != MMAL_SUCCESS) {
-            print_error("Setting zero-copy on " \
-                        "splitter %d input failed: 0x%08x", i, status);
-            ret = 1;
-            goto end;
-        }
+            status = mmal_port_parameter_set_boolean(input,
+                                                     MMAL_PARAMETER_ZERO_COPY,
+                                                     MMAL_TRUE);
+            if (status != MMAL_SUCCESS) {
+                print_error("Setting zero-copy on " \
+                            "splitter %d input failed: 0x%08x", i, status);
+                ret = 1;
+                goto end;
+            }
         }
 
         if (is_rawcam) {
@@ -1392,8 +1375,6 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
              * it to the splitter and wait for the isp to crop them.
              */
 
-            for (int k = 0; k < 10; k ++)
-                ((uint8_t*)header->data)[k] = 0xff;
             /* xxx: stride * height * 3 ? */
             header->length = width * height * 3;
             header->flags = MMAL_BUFFER_HEADER_FLAG_EOS;
