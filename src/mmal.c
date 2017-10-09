@@ -1452,6 +1452,15 @@ int rpigrafx_capture_next_frame(rpigrafx_frame_config_t *fcp)
                 ret = 1;
                 goto end;
             }
+
+            if (cfg->rawcam_camera_model == RPIGRAFX_RAWCAM_CAMERA_MODEL_IMX219) {
+                ret = rpiraw_raw8bggr_component_gain(raw8, width, raw8, width,
+                                               width, height, 1.55, 1.0, 1.5);
+                if (ret) {
+                    print_error("rpiraw_raw8bggr_component_gain: %d", ret);
+                    goto end;
+                }
+            }
             ret = rpiraw_raw8bggr_to_rgb888_nearest_neighbor(header->data,
                                                              stride,
                                                              raw8,
