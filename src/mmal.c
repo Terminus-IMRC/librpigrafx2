@@ -38,27 +38,93 @@
 static int32_t num_cameras = 0;
 
 /*
- * When camera->output[0] is used as a capture port:
- * camera [0] --- [0] splitter [0] --- [0] isp [0] --- [0] render
- *                             [1] --- [0] isp [0] --- [0] render
- *                             [2] --- [0] isp [0] --- [0] render
- *                             [3] --- [0] isp [0] --- [0] render
+ * ** Components connections **
  *
- * When vc.ril.camera->output[2] is used as a capture port,
- * the preview port (camera->output[0]) is still used for AWB processing:
- * camera [0] --- [0] null_sink
- *        [2] --- [0] splitter [0] --- [0] isp [0] --- [0] render
- *                             [1] --- [0] isp [0] --- [0] render
- *                             [2] --- [0] isp [0] --- [0] render
- *                             [3] --- [0] isp [0] --- [0] render
+ * name:   A normal component.
+ * name#:  A component using wrapper.
+ * [n]:    Port number of a component.
+ * (func): A userland function that does format or color conversion.
+ * /:      Tunneled connection.
+ * |:      Connection by using a shared port pool.
+ * !:      Connection by using separate (per-port) port pools.
+ *
+ * When camera->output[0] (preview port) is used as a capture port.
+ *            camera
+ *             [0]
+ *              /
+ *             [0]
+ *           splitter
+ *   [0]    [1]    [2]    [3]
+ *    /      /      /      /
+ *   [0]    [0]    [0]    [0]
+ *   isp    isp    isp    isp
+ *   [0]    [0]    [0]    [0]
+ *    |      |      |      |
+ *  (edit) (edit) (edit) (edit)
+ *    |      |      |      |
+ *   [0]    [0]    [0]    [0]
+ *  render render render render
+ *
+ * When vc.ril.camera->output[2] (capture port) is used as a capture port,
+ * the preview port (camera->output[0]) is still used for AWB processing.
+ *                    camera
+ *             [2]              [0]
+ *              /                /
+ *             [0]              [0]
+ *           splitter           null
+ *   [0]    [1]    [2]    [3]
+ *    /      /      /      /
+ *   [0]    [0]    [0]    [0]
+ *   isp    isp    isp    isp
+ *   [0]    [0]    [0]    [0]
+ *    |      |      |      |
+ *  (edit) (edit) (edit) (edit)
+ *    |      |      |      |
+ *   [0]    [0]    [0]    [0]
+ *  render render render render
  *
  * When vc.ril.rawcam->output[0] is used as a capture port,
- * camera control via I2C and hardware-side AWB processing are done by librpicam
- * and demosaicing and software-side AWB processing is done by librpiraw.
- * rawcam [0] --- (demosaic) --- [0] splitter [0] --- [0] isp [0] --- [0] render
- *                                            [1] --- [0] isp [0] --- [0] render
- *                                            [2] --- [0] isp [0] --- [0] render
- *                                            [3] --- [0] isp [0] --- [0] render
+ * camera control via I2C and hardware-side AWB processing is done by librpicam
+ * and demosaicing and software-side AWB processing are done by librpiraw.
+ *           rawcam#
+ *             [0]
+ *              !
+ *          (demosaic)
+ *              !
+ *             [0]
+ *          splitter#
+ *   [0]    [1]    [2]    [3]
+ *    /      /      /      /
+ *   [0]    [0]    [0]    [0]
+ *   isp    isp    isp    isp
+ *   [0]    [0]    [0]    [0]
+ *    |      |      |      |
+ *  (edit) (edit) (edit) (edit)
+ *    |      |      |      |
+ *   [0]    [0]    [0]    [0]
+ *  render render render render
+ *
+ * However, rawcam is used and use_isp_for_demosaicing is set,
+ * another isp instance is used for demosaicing.
+ *            rawcam
+ *             [0]
+ *              /
+ *             [0]
+ *             isp
+ *             [0]
+ *              /
+ *             [0]
+ *           splitter
+ *   [0]    [1]    [2]    [3]
+ *    /      /      /      /
+ *   [0]    [0]    [0]    [0]
+ *   isp    isp    isp    isp
+ *   [0]    [0]    [0]    [0]
+ *    |      |      |      |
+ *  (edit) (edit) (edit) (edit)
+ *    |      |      |      |
+ *   [0]    [0]    [0]    [0]
+ *  render render render render
  */
 
 /*
