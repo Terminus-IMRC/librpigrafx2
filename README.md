@@ -51,6 +51,8 @@ you can use it without much configurations.
 Currently, our rawcam support is limited to IMX219. How to run:
 
 ```
+$ echo 'dtparam=i2c_vc=on' | sudo tee -a /boot/config.txt
+$ sudo reboot
 $ wget https://raw.githubusercontent.com/6by9/userland/rawcam/camera_i2c
 $ chmod u+x camera_i2c
 $ ./camera_i2c
