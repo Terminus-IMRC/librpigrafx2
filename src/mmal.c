@@ -139,12 +139,34 @@ static MMAL_COMPONENT_T *cp_cameras[MAX_CAMERAS];
 #ifdef IMPL_RAWCAM
 static MMAL_WRAPPER_T *cpw_rawcams[MAX_CAMERAS];
 #endif /* IMPL_RAWCAM */
+static MMAL_COMPONENT_T *cp_splitters[MAX_CAMERAS];
+static MMAL_WRAPPER_T *cpw_splitters[MAX_CAMERAS];
+static MMAL_COMPONENT_T *cp_nulls[MAX_CAMERAS];
+static MMAL_COMPONENT_T *cp_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
+static MMAL_COMPONENT_T *cp_renders[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
+static MMAL_CONNECTION_T *conn_camera_nulls[MAX_CAMERAS];
+static MMAL_CONNECTION_T *conn_camera_splitters[MAX_CAMERAS];
+static MMAL_CONNECTION_T *conn_splitters_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
+static MMAL_CONNECTION_T *conn_isps_renders[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
+
 static struct cameras_config {
     _Bool is_used;
     int32_t width, height;
     int32_t max_width, max_height;
     unsigned camera_output_port_index;
     _Bool use_camera_capture_port;
+
+    struct splitter_config {
+        int next_output_idx;
+    } splitter;
+    struct isp_config {
+        int32_t width, height;
+        MMAL_FOURCC_T encoding;
+        _Bool is_zero_copy_rendering;
+    } isp[NUM_SPLITTER_OUTPUTS];
+    struct render_config {
+        MMAL_DISPLAYREGION_T region;
+    } render[NUM_SPLITTER_OUTPUTS];
 
     _Bool is_rawcam;
 #ifdef IMPL_RAWCAM
@@ -157,32 +179,6 @@ static struct cameras_config {
     } rpicam_config;
 #endif /* IMPL_RAWCAM */
 } cameras_config[MAX_CAMERAS];
-
-static MMAL_COMPONENT_T *cp_splitters[MAX_CAMERAS];
-static MMAL_WRAPPER_T *cpw_splitters[MAX_CAMERAS];
-static struct splitters_config {
-    int next_output_idx;
-} splitters_config[MAX_CAMERAS];
-
-static MMAL_COMPONENT_T *cp_nulls[MAX_CAMERAS];
-
-static MMAL_COMPONENT_T *cp_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
-static struct isps_config {
-    int32_t width, height;
-    MMAL_FOURCC_T encoding;
-    _Bool is_zero_copy_rendering;
-} isps_config[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
-
-static MMAL_COMPONENT_T *cp_renders[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
-static struct renders_config {
-    MMAL_DISPLAYREGION_T region;
-} renders_config[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
-
-static MMAL_CONNECTION_T *conn_camera_nulls[MAX_CAMERAS];
-static MMAL_CONNECTION_T *conn_camera_splitters[MAX_CAMERAS];
-static MMAL_CONNECTION_T *conn_splitters_isps[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
-static MMAL_CONNECTION_T *conn_isps_renders[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
-
 static struct callback_context *ctxs[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
 
 #define WARN_HEADER(pre, header, post) \
@@ -220,15 +216,16 @@ int priv_rpigrafx_mmal_init()
         goto end;
 
     for (i = 0; i < MAX_CAMERAS; i ++) {
+        struct cameras_config *cfg = &cameras_config[i];
         cp_cameras[i] = NULL;
-        cameras_config[i].is_used = 0;
-        cameras_config[i].is_rawcam = 0;
+        cfg->is_used = 0;
+        cfg->is_rawcam = 0;
         if ((ret = rpigrafx_config_camera_port(i,
                                                RPIGRAFX_CAMERA_PORT_PREVIEW)))
             goto end;
 
         cp_splitters[i] = NULL;
-        splitters_config[i].next_output_idx = 0;
+        cfg->splitter.next_output_idx = 0;
         conn_camera_splitters[i] = NULL;
 
         for (j = 0; j < NUM_SPLITTER_OUTPUTS; j ++) {
@@ -270,12 +267,14 @@ int priv_rpigrafx_mmal_init()
         }
 
         for (i = 0; i < num_cameras; i ++) {
-            cameras_config[i].max_width  = camera_info.cameras[i].max_width;
-            cameras_config[i].max_height = camera_info.cameras[i].max_height;
+            struct cameras_config *cfg = &cameras_config[i];
+            cfg->max_width  = camera_info.cameras[i].max_width;
+            cfg->max_height = camera_info.cameras[i].max_height;
         }
         for (; i < MAX_CAMERAS; i ++) {
-            cameras_config[i].max_width  = 0;
-            cameras_config[i].max_height = 0;
+            struct cameras_config *cfg = &cameras_config[i];
+            cfg->max_width  = 0;
+            cfg->max_height = 0;
         }
 
         status = mmal_component_destroy(cp_camera_info);
@@ -302,14 +301,15 @@ int priv_rpigrafx_mmal_finalize()
         goto skip;
 
     for (i = 0; i < MAX_CAMERAS; i ++) {
+        struct cameras_config *cfg = &cameras_config[i];
         cp_cameras[i] = cp_splitters[i] = NULL;
         for (j = 0; j < NUM_SPLITTER_OUTPUTS; j ++)
             cp_isps[i][j] = NULL;
-        cameras_config[i].width  = -1;
-        cameras_config[i].height = -1;
-        cameras_config[i].max_width  = -1;
-        cameras_config[i].max_height = -1;
-        splitters_config[i].next_output_idx = 0;
+        cfg->width  = -1;
+        cfg->height = -1;
+        cfg->max_width  = -1;
+        cfg->max_height = -1;
+        cfg->splitter.next_output_idx = 0;
     }
 
 skip:
@@ -339,6 +339,7 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
 {
     int32_t max_width, max_height;
     int idx;
+    struct cameras_config *cfg = &cameras_config[camera_number];
     struct callback_context *ctx = NULL;
     int ret = 0;
 
@@ -348,8 +349,8 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
         ret = 1;
         goto end;
     }
-    max_width  = cameras_config[camera_number].max_width;
-    max_height = cameras_config[camera_number].max_height;
+    max_width  = cfg->max_width;
+    max_height = cfg->max_height;
     if (width > max_width) {
         print_error("width(%d) exceeds max_width(%d) of camera %d",
                     width, max_width, camera_number);
@@ -364,24 +365,24 @@ int rpigrafx_config_camera_frame(const int32_t camera_number,
 
     /*
      * Only set use flag here.
-     * cameras_config[camera_number].{width,height}
+     * cfg->{width,height}
      * will be set on rpigrafx_finish_config.
      */
-    cameras_config[camera_number].is_used = !0;
+    cfg->is_used = !0;
 
-    if (splitters_config[camera_number].next_output_idx == NUM_SPLITTER_OUTPUTS - 1) {
+    if (cfg->splitter.next_output_idx == NUM_SPLITTER_OUTPUTS - 1) {
         print_error("Too many splitter clients(%d) of camera %d",
-                    splitters_config[camera_number].next_output_idx,
+                    cfg->splitter.next_output_idx,
                     camera_number);
         ret = 1;
         goto end;
     }
-    idx = splitters_config[camera_number].next_output_idx ++;
+    idx = cfg->splitter.next_output_idx ++;
 
-    isps_config[camera_number][idx].width  = width;
-    isps_config[camera_number][idx].height = height;
-    isps_config[camera_number][idx].encoding = encoding;
-    isps_config[camera_number][idx].is_zero_copy_rendering = is_zero_copy_rendering;
+    cfg->isp[idx].width  = width;
+    cfg->isp[idx].height = height;
+    cfg->isp[idx].encoding = encoding;
+    cfg->isp[idx].is_zero_copy_rendering = is_zero_copy_rendering;
 
     ctx = malloc(sizeof(*ctx));
     if (ctx == NULL) {
@@ -418,6 +419,7 @@ int rpigrafx_config_rawcam(const rpigrafx_rawcam_camera_model_t camera_model,
     uint32_t image_id;
     MMAL_PARAMETER_CAMERA_RX_CONFIG_T rx_cfg;
     MMAL_FOURCC_T encoding = MMAL_FOURCC('\0', '\0', '\0', '\0');
+    struct cameras_config *cfg = &cameras_config[fcp->camera_number];
     int ret = 0;
 
     /*
@@ -491,13 +493,11 @@ int rpigrafx_config_rawcam(const rpigrafx_rawcam_camera_model_t camera_model,
     rx_cfg.pack       = pack;
     rx_cfg.data_lanes = data_lanes;
     rx_cfg.image_id   = image_id;
-    memcpy(&cameras_config[fcp->camera_number].rx_cfg, &rx_cfg, sizeof(rx_cfg));
-    cameras_config[fcp->camera_number].nbits_of_raw_from_camera =
-                                                       nbits_of_raw_from_camera;
-
-    cameras_config[fcp->camera_number].rawcam_camera_model = camera_model;
-    cameras_config[fcp->camera_number].is_rawcam = !0;
-    cameras_config[fcp->camera_number].raw_encoding = encoding;
+    memcpy(&cfg->rx_cfg, &rx_cfg, sizeof(rx_cfg));
+    cfg->nbits_of_raw_from_camera = nbits_of_raw_from_camera;
+    cfg->rawcam_camera_model = camera_model;
+    cfg->is_rawcam = !0;
+    cfg->raw_encoding = encoding;
 
 end:
     return ret;
@@ -529,31 +529,31 @@ int rpigrafx_config_rawcam_imx219(const float exck_freq,
 {
 #ifdef IMPL_RAWCAM
 
-    struct rpicam_imx219_config cfg;
+    struct rpicam_imx219_config imx219;
+    struct cameras_config *cfg = &cameras_config[fcp->camera_number];
     int ret = 0;
 
-    if (cameras_config[fcp->camera_number].rawcam_camera_model !=
-                                          RPIGRAFX_RAWCAM_CAMERA_MODEL_IMX219) {
+    if (cfg->rawcam_camera_model != RPIGRAFX_RAWCAM_CAMERA_MODEL_IMX219) {
         print_error("rawcam is not configured for IMX219");
         ret = 1;
         goto end;
     }
 
-    rpicam_imx219_default_config(&cfg);
-    cfg.exck_freq.num = exck_freq * 1000;
-    cfg.exck_freq.den = 1000;
-    cfg.temperature_en = !0;
-    cfg.num_csi_lanes = cameras_config[fcp->camera_number].rx_cfg.data_lanes;
-    cfg.x = x;
-    cfg.y = y;
-    cfg.hori_orientation = orient_hori;
-    cfg.vert_orientation = orient_vert;
-    switch (cameras_config[fcp->camera_number].nbits_of_raw_from_camera) {
+    rpicam_imx219_default_config(&imx219);
+    imx219.exck_freq.num = exck_freq * 1000;
+    imx219.exck_freq.den = 1000;
+    imx219.temperature_en = !0;
+    imx219.num_csi_lanes = cfg->rx_cfg.data_lanes;
+    imx219.x = x;
+    imx219.y = y;
+    imx219.hori_orientation = orient_hori;
+    imx219.vert_orientation = orient_vert;
+    switch (cfg->nbits_of_raw_from_camera) {
         case 8:
-            cfg.comp_enable = !0;
+            imx219.comp_enable = !0;
             break;
         case 10:
-            cfg.comp_enable = 0;
+            imx219.comp_enable = 0;
             break;
         default:
             print_error("IMX219 supports only for raw8 and raw10");
@@ -566,8 +566,7 @@ int rpigrafx_config_rawcam_imx219(const float exck_freq,
             break;
     }
 
-    memcpy(&cameras_config[fcp->camera_number].rpicam_config.imx219, &cfg,
-           sizeof(cfg));
+    memcpy(&cfg->rpicam_config.imx219, &imx219, sizeof(imx219));
 
 end:
     return ret;
@@ -632,10 +631,10 @@ int rpigrafx_config_camera_frame_render(const _Bool is_fullscreen,
                | MMAL_DISPLAY_SET_DEST_RECT
                | MMAL_DISPLAY_SET_LAYER
     };
+    struct cameras_config *cfg = &cameras_config[fcp->camera_number];
     int ret = 0;
 
-    memcpy(&renders_config[fcp->camera_number]
-                                       [fcp->splitter_output_port_index].region,
+    memcpy(&cfg->render[fcp->splitter_output_port_index].region,
            &region, sizeof(region));
 
     return ret;
@@ -646,6 +645,7 @@ static int setup_cp_camera_rawcam(const int i,
 {
 #ifdef IMPL_RAWCAM
 
+    struct cameras_config *cfg = &cameras_config[i];
     MMAL_STATUS_T status;
     int ret = 0;
 
@@ -657,10 +657,9 @@ static int setup_cp_camera_rawcam(const int i,
         goto end;
     }
 
-    switch (cameras_config[i].rawcam_camera_model) {
+    switch (cfg->rawcam_camera_model) {
         case RPIGRAFX_RAWCAM_CAMERA_MODEL_IMX219: {
-            struct rpicam_imx219_config *stp = &cameras_config[i]
-                                                          .rpicam_config.imx219;
+            struct rpicam_imx219_config *stp = &cfg->rpicam_config.imx219;
             stp->width = width;
             stp->height = height;
             if ((ret = rpicam_imx219_open(stp)))
@@ -678,7 +677,7 @@ static int setup_cp_camera_rawcam(const int i,
                 .size = sizeof(rx_cfg)
             }
         };
-        MMAL_FOURCC_T encoding = cameras_config[i].raw_encoding;
+        MMAL_FOURCC_T encoding = cfg->raw_encoding;
 
         if (output == NULL) {
             print_error("Getting output %d of camera %d failed", 0, i);
@@ -703,12 +702,12 @@ static int setup_cp_camera_rawcam(const int i,
         }
 
         /* Use default values for encode_block_length and embedded_data_lines. */
-        rx_cfg.decode     = cameras_config[i].rx_cfg.decode;
-        rx_cfg.encode     = cameras_config[i].rx_cfg.encode;
-        rx_cfg.unpack     = cameras_config[i].rx_cfg.unpack;
-        rx_cfg.pack       = cameras_config[i].rx_cfg.pack;
-        rx_cfg.data_lanes = cameras_config[i].rx_cfg.data_lanes;
-        rx_cfg.image_id   = cameras_config[i].rx_cfg.image_id;
+        rx_cfg.decode     = cfg->rx_cfg.decode;
+        rx_cfg.encode     = cfg->rx_cfg.encode;
+        rx_cfg.unpack     = cfg->rx_cfg.unpack;
+        rx_cfg.pack       = cfg->rx_cfg.pack;
+        rx_cfg.data_lanes = cfg->rx_cfg.data_lanes;
+        rx_cfg.image_id   = cfg->rx_cfg.image_id;
         status = mmal_port_parameter_set(output, &rx_cfg.hdr);
         if (status != MMAL_SUCCESS) {
             print_error("Setting rx_cfg of rawcam %d failed: 0x%08x",
@@ -750,7 +749,8 @@ static int setup_cp_camera(const int i,
                            const int32_t width, const int32_t height,
                            const _Bool setup_preview_port_for_null)
 {
-    const unsigned camera_output_port_index = cameras_config[i].camera_output_port_index;
+    struct cameras_config *cfg = &cameras_config[i];
+    const unsigned camera_output_port_index = cfg->camera_output_port_index;
     MMAL_STATUS_T status;
     int ret = 0;
 
@@ -1055,6 +1055,7 @@ end:
 static int setup_cp_isp(const int i, const int j,
                         const int32_t width, const int32_t height)
 {
+    struct cameras_config *cfg = &cameras_config[i];
     MMAL_STATUS_T status;
     int ret = 0;
 
@@ -1120,9 +1121,9 @@ static int setup_cp_isp(const int i, const int j,
         }
 
         status = config_port(output,
-                             isps_config[i][j].encoding,
-                             isps_config[i][j].width,
-                             isps_config[i][j].height);
+                             cfg->isp[j].encoding,
+                             cfg->isp[j].width,
+                             cfg->isp[j].height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "isp %d output %d failed: 0x%08x", i, j, status);
@@ -1154,6 +1155,7 @@ end:
 
 static int setup_cp_render(const int i, const int j)
 {
+    struct cameras_config *cfg = &cameras_config[i];
     MMAL_STATUS_T status;
     int ret = 0;
 
@@ -1194,9 +1196,9 @@ static int setup_cp_render(const int i, const int j)
         }
 
         status = config_port(input,
-                             isps_config[i][j].encoding,
-                             isps_config[i][j].width,
-                             isps_config[i][j].height);
+                             cfg->isp[j].encoding,
+                             cfg->isp[j].width,
+                             cfg->isp[j].height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "render %d input %d failed: 0x%08x", i, j, status);
@@ -1205,7 +1207,7 @@ static int setup_cp_render(const int i, const int j)
         }
 
         status = mmal_util_set_display_region(input,
-                                              &renders_config[i][j].region);
+                                              &cfg->render[j].region);
         if (status != MMAL_SUCCESS) {
             print_error("Setting region of " \
                         "render %d input %d failed: 0x%08x", i, j, status);
@@ -1370,15 +1372,15 @@ int rpigrafx_finish_config()
         int32_t max_width, max_height;
         struct cameras_config *cfg = &cameras_config[i];
 
-        if (!cameras_config[i].is_used)
+        if (!cfg->is_used)
             continue;
 
-        len = splitters_config[i].next_output_idx;
+        len = cfg->splitter.next_output_idx;
 
         max_width = max_height = 0;
         for (j = 0; j < len; j ++) {
-            max_width  = MMAL_MAX(max_width,  isps_config[i][j].width);
-            max_height = MMAL_MAX(max_height, isps_config[i][j].height);
+            max_width  = MMAL_MAX(max_width,  cfg->isp[j].width);
+            max_height = MMAL_MAX(max_height, cfg->isp[j].height);
         }
         cfg->width = max_width;
         cfg->height = max_height;
