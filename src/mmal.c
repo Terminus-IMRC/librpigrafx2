@@ -193,8 +193,9 @@ static struct callback_context *ctxs[MAX_CAMERAS][NUM_SPLITTER_OUTPUTS];
        } \
     } while (0)
 
-static MMAL_STATUS_T config_port(MMAL_PORT_T *port, const MMAL_FOURCC_T encoding,
-                                 const int width, const int height)
+static MMAL_STATUS_T config_port(MMAL_PORT_T *port,
+                                 const MMAL_FOURCC_T encoding,
+                                 const int32_t width, const int32_t height)
 {
     port->format->encoding = encoding;
     port->format->es->video.width  = VCOS_ALIGN_UP(width,  32);
@@ -203,6 +204,23 @@ static MMAL_STATUS_T config_port(MMAL_PORT_T *port, const MMAL_FOURCC_T encoding
     port->format->es->video.crop.y = 0;
     port->format->es->video.crop.width  = width;
     port->format->es->video.crop.height = height;
+    return mmal_port_format_commit(port);
+}
+
+static MMAL_STATUS_T config_port_crop(MMAL_PORT_T *port,
+                                      const MMAL_FOURCC_T encoding,
+                                      const int32_t actual_width,
+                                      const int32_t actual_height,
+                                      const int32_t crop_width,
+                                      const int32_t crop_height)
+{
+    port->format->encoding = encoding;
+    port->format->es->video.width  = VCOS_ALIGN_UP(actual_width,  32);
+    port->format->es->video.height = VCOS_ALIGN_UP(actual_height, 16);
+    port->format->es->video.crop.x = 0;
+    port->format->es->video.crop.y = 0;
+    port->format->es->video.crop.width  = crop_width;
+    port->format->es->video.crop.height = crop_height;
     return mmal_port_format_commit(port);
 }
 
@@ -927,6 +945,7 @@ static int setup_cp_splitter(const int i, const int len,
 {
     int j;
     MMAL_COMPONENT_T *component = NULL;
+    struct cameras_config *cfg = &cameras_config[i];
     MMAL_STATUS_T status;
     int ret = 0;
 
@@ -1013,6 +1032,8 @@ static int setup_cp_splitter(const int i, const int len,
     for (j = 0; j < len; j ++) {
         MMAL_PORT_T *output = mmal_util_get_port(component,
                                                  MMAL_PORT_TYPE_OUTPUT, j);
+        const int32_t output_width  = cfg->isp[j].width,
+                      output_height = cfg->isp[j].height;
 
         if (output == NULL) {
             print_error("Getting output port of splitter %d,%d failed", i, j);
@@ -1020,7 +1041,10 @@ static int setup_cp_splitter(const int i, const int len,
             goto end;
         }
 
-        status = config_port(output, MMAL_ENCODING_RGB24, width, height);
+        status = config_port_crop(output, MMAL_ENCODING_RGB24,
+                                  width, height,
+                                  output_width  * (width  / output_width ),
+                                  output_height * (height / output_height));
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "splitter %d output %d failed: 0x%08x", i, j, status);
@@ -1086,6 +1110,8 @@ static int setup_cp_isp(const int i, const int j,
     {
         MMAL_PORT_T *input = mmal_util_get_port(cp_isps[i][j],
                                                 MMAL_PORT_TYPE_INPUT, 0);
+        const int32_t output_width  = cfg->isp[j].width,
+                      output_height = cfg->isp[j].height;
 
         if (input == NULL) {
             print_error("Getting input port of isp %d,%d failed", i, j);
@@ -1093,7 +1119,9 @@ static int setup_cp_isp(const int i, const int j,
             goto end;
         }
 
-        status = config_port(input, MMAL_ENCODING_RGB24, width, height);
+        status = config_port_crop(input, MMAL_ENCODING_RGB24, width, height,
+                                  output_width  * (width  / output_width ),
+                                  output_height * (height / output_height));
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "isp %d input %d failed: 0x%08x", i, j, status);
@@ -1120,10 +1148,8 @@ static int setup_cp_isp(const int i, const int j,
             goto end;
         }
 
-        status = config_port(output,
-                             cfg->isp[j].encoding,
-                             cfg->isp[j].width,
-                             cfg->isp[j].height);
+        status = config_port(output, cfg->isp[j].encoding,
+                             cfg->isp[j].width, cfg->isp[j].height);
         if (status != MMAL_SUCCESS) {
             print_error("Setting format of " \
                         "isp %d output %d failed: 0x%08x", i, j, status);
@@ -1382,6 +1408,19 @@ int rpigrafx_finish_config()
             max_width  = MMAL_MAX(max_width,  cfg->isp[j].width);
             max_height = MMAL_MAX(max_height, cfg->isp[j].height);
         }
+#ifdef IMPL_RAWCAM
+        if (cfg->is_rawcam) {
+            switch (cfg->rawcam_camera_model) {
+                case RPIGRAFX_RAWCAM_CAMERA_MODEL_IMX219: {
+                    const int32_t mag = MMAL_MIN(cfg->max_width  / max_width,
+                                                 cfg->max_height / max_height);
+                    max_width  *= mag;
+                    max_height *= mag;
+                    break;
+                }
+            }
+        }
+#endif /* IMPL_RAWCAM */
         cfg->width = max_width;
         cfg->height = max_height;
 
