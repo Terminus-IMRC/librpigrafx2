@@ -9,6 +9,7 @@ config.status
 /m4/lt*.m4
 /m4/libtool.m4
 
+/rpi3-gpiovirtbuf/
 /test/test_dispmanx
 /test/test_capture_render_seq
 /test/test_rawcam_imx219

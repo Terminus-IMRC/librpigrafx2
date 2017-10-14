@@ -51,13 +51,7 @@ you can use it without much configurations.
 Currently, our rawcam support is limited to IMX219. How to run:
 
 ```
-$ echo 'dtparam=i2c_vc=on' | sudo tee -a /boot/config.txt
+$ ./prepare_rawcam.sh
 $ sudo reboot
-
-$ mkdir rpi3-gpiovirtbuf/
-$ wget -P rpi3-gpiovirtbuf/ https://github.com/6by9/userland/raw/rawcam/rpi3-gpiovirtbuf
-$ chmod u+x rpi3-gpiovirtbuf/rpi3-gpiovirtbuf
-$ curl -s https://raw.githubusercontent.com/6by9/userland/rawcam/camera_i2c | bash
-
 $ ./test/test_rawcam_imx219
 ```
