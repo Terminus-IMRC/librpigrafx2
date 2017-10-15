@@ -14,12 +14,21 @@ if test -n "$IS_I2C0_DISABLED"; then
 fi
 
 # Install i2c-tools for i2cdetect command which is used in camera_i2c script.
-echo '* Installing i2c-tools...'
-sudo apt-get --quiet install --quiet --yes i2c-tools
+echo '* Installing i2c-tools and git...'
+sudo apt-get install --yes i2c-tools git
 
-# Install rpi3-gpiovirtbuf which is ued in camera_i2c script.
+TMP=$(mktemp -d)
+pushd "$TMP"
+
+# Install wiringPi (gpio command) which is used in camera_i2c script.
+echo '* Installing wiringPi (gpio)...'
+git clone --depth=1 git://git.drogon.net/wiringPi
+pushd wiringPi/
+./build
+popd
+
+# Install rpi3-gpiovirtbuf which is used in camera_i2c script.
 echo '* Installing rpi3-gpiovirtbuf...'
-rm -rf rpi3-gpiovirtbuf/
 mkdir rpi3-gpiovirtbuf/
 wget --quiet --directory-prefix=rpi3-gpiovirtbuf/ https://github.com/6by9/userland/raw/rawcam/rpi3-gpiovirtbuf
 chmod u+x rpi3-gpiovirtbuf/rpi3-gpiovirtbuf
@@ -27,5 +36,8 @@ chmod u+x rpi3-gpiovirtbuf/rpi3-gpiovirtbuf
 # Run camera_i2c script to enable power for camera.
 echo '* Running camera_i2c script...'
 curl --silent https://raw.githubusercontent.com/6by9/userland/rawcam/camera_i2c | bash
+
+popd
+rm -rf "$TMP"
 
 echo '* Done.'
