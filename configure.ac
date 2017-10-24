@@ -95,7 +95,6 @@ AM_CONDITIONAL([HAVE_RPIRAW], [test "x${_have_rpiraw}" = "xyes"])
 
 # Checks for header files.
 AC_CHECK_HEADERS([stdio.h stdint.h stdlib.h])
-AC_CHECK_HEADER([bcm_host.h], [], [AC_MSG_ERROR("missing bcm_host.h")])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_UINT32_T
