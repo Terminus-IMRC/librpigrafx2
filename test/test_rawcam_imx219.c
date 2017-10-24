@@ -1,6 +1,7 @@
 #include <rpigrafx.h>
 #include <stdio.h>
 #include <sys/time.h>
+#include <rpiraw.h>
 
 #define _check(x) \
     do { \
@@ -18,6 +19,32 @@ static double get_time()
     return (double) tv.tv_sec + tv.tv_usec * 1e-6;
 }
 
+static void *frame = NULL;
+static const int frame_width  = 2048,
+                 frame_height = 2048;
+
+static void sighandler_save_image(int signum)
+{
+    static unsigned cnt = 0;
+    char file[100];
+    int ret;
+
+    (void) signum;
+
+    if (frame == NULL)
+        return;
+
+    snprintf(file, sizeof(file) / sizeof(*file), "raw%04d.png", cnt);
+    cnt ++;
+    printf("Writing to %s\n", file);
+    ret = rpiraw_write_png_rgb888(file, frame, frame_width,
+            frame_width, frame_height);
+    if (ret) {
+        fprintf(stderr, "rpiraw_write_png_rgb888: %d\n", ret);
+        exit(EXIT_FAILURE);
+    }
+}
+
 int main()
 {
     int i;
@@ -26,9 +53,14 @@ int main()
     rpigrafx_frame_config_t fc;
     double start, end, time;
 
-    rpigrafx_set_verbose(1);
+    if (signal(SIGINT, sighandler_save_image) == SIG_ERR) {
+        fprintf(stderr, "signal: %s\n", strerror(errno));
+        exit(EXIT_FAILURE);
+    }
+
+    rpigrafx_set_verbose(0);
     _check(rpigrafx_get_screen_size(&screen_width, &screen_height));
-    _check(rpigrafx_config_camera_frame(0, 2048, 2048,
+    _check(rpigrafx_config_camera_frame(0, frame_width, frame_height,
                                         MMAL_ENCODING_RGB24, 0, &fc));
     _check(rpigrafx_config_rawcam(RPIGRAFX_RAWCAM_CAMERA_MODEL_IMX219,
                                   MMAL_CAMERA_RX_CONFIG_DECODE_NONE,
@@ -44,10 +76,9 @@ int main()
 
     start = get_time();
     for (i = 0; i < nframes; i ++) {
-        void *p = NULL;
         fprintf(stderr, "#%d\n", i);
         _check(rpigrafx_capture_next_frame(&fc));
-        p = rpigrafx_get_frame(&fc);
+        frame = rpigrafx_get_frame(&fc);
         _check(rpigrafx_render_frame(&fc));
     }
     end = get_time();
