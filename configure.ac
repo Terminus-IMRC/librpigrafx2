@@ -75,14 +75,14 @@ AC_CHECK_LIB([qmkl], [mailbox_qpu_enable],
              [AC_MSG_ERROR("missing -lqmkl")])
 
 AC_ARG_WITH([rpicam], AS_HELP_STRING([--with-rpicam], [Build with the librpicam interface]))
-if test "x$with_rpicam" = "xyes"; then
+AS_IF([test "x$with_rpicam" = "xyes"], [
 	PKG_CHECK_MODULES([RPICAM], [librpicam],
 			  [_have_rpicam=yes
 			  AC_SUBST([RPICAM], [librpicam])
 			  AC_SUBST([RPICAM_CFLAGS])
 			  AC_SUBST([RPICAM_LIBS])],
 			  [have_rpicam=no])
-fi
+])
 
 AS_IF([test x${_have_rpicam} = "xyes"],
       [AC_DEFINE([HAVE_RPICAM], 1, [Define to 1 if you have librpicam.])])
@@ -90,14 +90,14 @@ AM_CONDITIONAL([HAVE_RPICAM], [test "x${_have_rpicam}" = "xyes"])
 
 
 AC_ARG_WITH([rpiraw], AS_HELP_STRING([--with-rpiraw], [Build with the librpiraw interface]))
-if test "x$with_rpiraw" = "xyes"; then
+AS_IF([test "x$with_rpiraw" = "xyes"], [
 	PKG_CHECK_MODULES([RPIRAW], [librpiraw],
 			  [_have_rpiraw=yes
 			  AC_SUBST([RPIRAW], [librpiraw])
 			  AC_SUBST([RPIRAW_CFLAGS])
 			  AC_SUBST([RPIRAW_LIBS])],
 			  [have_rpiraw=no])
-fi
+])
 
 AS_IF([test x${_have_rpiraw} = "xyes"],
       [AC_DEFINE([HAVE_RPIRAW], 1, [Define to 1 if you have librpiraw.])])
