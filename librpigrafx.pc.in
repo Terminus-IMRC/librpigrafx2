@@ -6,6 +6,6 @@ includedir=@includedir@
 Name: @PACKAGE@
 Description: Graphic library for Raspberry Pi
 Version: @VERSION@
-Requires: bcm_host mmal librpicam librpiraw
+Requires: bcm_host mmal @RPICAM@ @RPIRAW@
 Cflags: -I${includedir}
 Libs: -L${libdir} -lrpigrafx
