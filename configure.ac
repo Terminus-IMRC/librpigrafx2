@@ -69,10 +69,11 @@ if test "$librpigrafx_cv_have_mmal" = "no"; then
                [AC_MSG_ERROR("missing -lmmal_vc_client")])
 fi
 
-AC_CHECK_LIB([qmkl], [mailbox_qpu_enable],
-             [QMKL_LIBS=-lqmkl
-              AC_SUBST(QMKL_LIBS)],
-             [AC_MSG_ERROR("missing -lqmkl")])
+PKG_CHECK_MODULES([MAILBOX], [libmailbox],
+		  [AC_SUBST([MAILBOX_CFLAGS])
+		   AC_SUBST([MAILBOX_LIBS])
+		  ],
+		  [AC_MSG_ERROR("missing libmailbox")])
 
 AC_ARG_WITH([rpicam], AS_HELP_STRING([--with-rpicam], [Build with the librpicam interface]))
 AS_IF([test "x$with_rpicam" = "xyes"], [
