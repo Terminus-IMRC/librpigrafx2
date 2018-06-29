@@ -78,6 +78,7 @@ AC_ARG_WITH([rpicam], AS_HELP_STRING([--with-rpicam], [Build with the librpicam 
 if test "x$with_rpicam" = "xyes"; then
 	PKG_CHECK_MODULES([RPICAM], [librpicam],
 			  [_have_rpicam=yes
+			  AC_SUBST([RPICAM], [librpicam])
 			  AC_SUBST([RPICAM_CFLAGS])
 			  AC_SUBST([RPICAM_LIBS])],
 			  [have_rpicam=no])
@@ -92,6 +93,7 @@ AC_ARG_WITH([rpiraw], AS_HELP_STRING([--with-rpiraw], [Build with the librpiraw 
 if test "x$with_rpiraw" = "xyes"; then
 	PKG_CHECK_MODULES([RPIRAW], [librpiraw],
 			  [_have_rpiraw=yes
+			  AC_SUBST([RPIRAW], [librpiraw])
 			  AC_SUBST([RPIRAW_CFLAGS])
 			  AC_SUBST([RPIRAW_LIBS])],
 			  [have_rpiraw=no])
